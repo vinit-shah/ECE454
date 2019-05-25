@@ -2,6 +2,10 @@ import java.io.*;
 import java.net.*;
 import java.nio.charset.*;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.lang.StringBuffer;
+import helper.Graph;
+import helper.Edge;
 
 class CCServer {
     public static void main(String args[]) throws Exception {
@@ -31,10 +35,28 @@ class CCServer {
             DataInputStream din = new DataInputStream(csock.getInputStream());
             int reqDataLen = din.readInt();
             System.out.println("received request header, data payload has length " + reqDataLen);
-            byte[] bytes = new byte[reqDataLen];
+            byte[] bytes = new byte[reqDataLen-1]; // trailing whitespace
             din.readFully(bytes);
             String input = new String(bytes, StandardCharsets.UTF_8);
-            System.out.println("Input was " + input);
+            String[] splitted = input.split("\\W+");
+            Graph g = new Graph();
+            for (int i = 0; i < splitted.length; i+=2) {
+                int src = Integer.parseInt(splitted[i]);
+                int dest = Integer.parseInt(splitted[i+1]);
+                Edge e = new Edge(src,dest);
+                g.addEdge(e);
+            }
+            HashMap<Integer,Integer> connectedComponents = g.connectedComponents();
+            StringBuffer output = new StringBuffer();
+            for (int vertex: connectedComponents.keySet()) {
+                output.append(vertex + " " + connectedComponents.get(vertex) + "\n");
+            }
+            String ret = output.toString();
+            DataOutputStream dout = new DataOutputStream(csock.getOutputStream());
+            bytes = ret.getBytes("UTF-8");
+            dout.writeInt(bytes.length);
+            dout.write(bytes);
+            dout.flush();
 	    }
         catch (Exception e) {
 		e.printStackTrace();
