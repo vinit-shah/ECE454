@@ -110,7 +110,6 @@ class Graph {
     }
 
     public static void main(String args[]) {
-        String filename =
         Edge edge1 = new Edge(1,2);
         Edge edge2 = new Edge(3,5);
         Edge edge3 = new Edge(4,5);
