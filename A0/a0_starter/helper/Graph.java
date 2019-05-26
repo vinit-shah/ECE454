@@ -4,80 +4,61 @@ import java.io.*;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.HashMap;
+import helper.Edge;
+
+class Struct {
+    public int rootId;
+    public int rank;
+    public Struct(int rootId, int rank) {
+        this.rootId = rootId;
+        this.rank = rank;
+    }
+}
 
 public class Graph {
-    private HashMap<Integer, Integer> ranks;
-    private HashMap<Integer, Integer> roots;
-    private HashMap<Integer, ArrayList<Integer>> subsets;
-
-    private void updateSet(int setId, int addedSetId) {
-        // set the root of all elements in the set to be added to be newRootId
-        ArrayList<Integer> arr = subsets.get(addedSetId);
-        for (int vertex : arr) {
-            roots.replace(vertex, setId);
-        }
-        subsets.get(setId).add(addedSetId);
-        subsets.get(setId).addAll(subsets.get(addedSetId));
-    }
+    private HashMap<Integer, Struct> map;
 
     public Graph() {
-        ranks = new HashMap<Integer,Integer>();
-        roots = new HashMap<Integer,Integer>();
-        subsets = new HashMap<Integer, ArrayList<Integer>>();
+        map = new HashMap<Integer, Struct>();
     }
 
     public void addEdge(Edge edge) {
+        // edges.add(edge);
         int srcId = edge.getSource();
         int destId = edge.getDestination();
-        if (!ranks.containsKey(srcId)) ranks.put(srcId, 0);
-        if (!ranks.containsKey(destId)) ranks.put(destId, 0);
-        if (!roots.containsKey(srcId)) roots.put(srcId, srcId);
-        if (!roots.containsKey(destId)) roots.put(destId, destId);
-        if (!subsets.containsKey(srcId)) {
-            ArrayList<Integer> arr = new ArrayList<Integer>();
-            subsets.put(srcId,arr);
-        }
-        if (!subsets.containsKey(destId)) {
-            ArrayList<Integer> arr = new ArrayList<Integer>();
-            subsets.put(destId, arr);
-        }
+        if(!map.containsKey(srcId)) map.put(srcId, new Struct(srcId,0));
+        if(!map.containsKey(destId)) map.put(destId, new Struct(destId,0));
         union(srcId, destId);
     }
 
-    // find parent of vertex (path compression done here)
-    public int findRoot(int vertexId) {
-        int parentId = roots.get(vertexId);
-        if (parentId != vertexId) {
-            int newRootId = findRoot(parentId);
-            roots.replace(vertexId,newRootId);
+    public Struct findRoot(int vertexId) {
+        int rootId = map.get(vertexId).rootId;
+        if (rootId != vertexId) {
+            Struct newRootId = findRoot(rootId);
+            map.replace(vertexId, newRootId);
         }
-        return roots.get(vertexId);
+        return map.get(vertexId);
     }
 
-    // perform union by union by rank
     public void union(int x, int y) {
-        int xRoot = findRoot(x);
-        int yRoot = findRoot(y);
-        if (xRoot != yRoot) {
-            int xRootRank = ranks.get(xRoot);
-            int yRootRank = ranks.get(yRoot);
-            if (xRootRank < yRootRank) {
-                roots.replace(xRoot,yRoot);
-                updateSet(yRoot,xRoot);
-            } else if (yRootRank < xRootRank) {
-                roots.replace(yRoot,xRoot);
-                updateSet(xRoot,yRoot);
-            }
-            else {
-                roots.replace(yRoot,xRoot);
-                ranks.replace(xRoot,ranks.get(xRoot) + 1);
-                updateSet(xRoot,yRoot);
+        Struct xRoot = findRoot(x);
+        Struct yRoot = findRoot(y);
+        if (xRoot.rootId != yRoot.rootId) {
+            if (xRoot.rank < yRoot.rank) {
+                map.replace(xRoot.rootId, yRoot);
+            } else if (xRoot.rank > yRoot.rank) {
+                map.replace(yRoot.rootId, xRoot);
+            } else {
+                map.replace(yRoot.rootId, xRoot);
             }
         }
     }
 
-    // return connected components
-    public HashMap<Integer,Integer> connectedComponents() {
-        return roots;
+    public HashMap<Integer, Integer> connectedComponents() {
+        HashMap<Integer,Integer> ret = new HashMap<Integer,Integer>();
+        for (int vertex : map.keySet()) {
+            ret.put(vertex,findRoot(vertex).rootId);
+        }
+        return ret;
     }
 }
