@@ -23,7 +23,6 @@ public class Graph {
     }
 
     public void addEdge(Edge edge) {
-        // edges.add(edge);
         int srcId = edge.getSource();
         int destId = edge.getDestination();
         if(!map.containsKey(srcId)) map.put(srcId, new Struct(srcId,0));
