@@ -30,42 +30,51 @@ class CCServer {
 		*/
                 Socket csock = ssock.accept();
                 System.out.println("Accepted connection from client at: " + csock.getPort());
-                DataInputStream din = new DataInputStream(csock.getInputStream());
-                int reqDataLen = din.readInt();     // read the next 4 bytes as an int
-                System.out.println("received request header, data payload has length " + reqDataLen);
-                byte[] bytes_in = new byte[reqDataLen];
-                din.readFully(bytes_in);
-                int src = 0;
-                int dest = 0;
-                boolean isSrc = true;
-                Graph g = new Graph();
-                for (int i = 0; i < reqDataLen; i++) {
-                    int s = bytes_in[i] - '0';
-                    if (s == -16) {
-                        isSrc = false;
-                    } else if (s == -38) {
-                        g.addEdge(new Edge(src, dest));
-                        src = 0;
-                        dest = 0;
-                        isSrc = true;
-                    } else {
-                        if (isSrc) {
-                            src = src*10 + s;
+                while (!csock.isInputShutdown()) {
+                    DataInputStream din = new DataInputStream(csock.getInputStream());
+                    int reqDataLen = 0;
+                    try {
+                        reqDataLen = din.readInt();     // read the next 4 bytes as an int
+                    } catch (EOFException e) {
+                        System.out.println("connection closed by client");
+                        break;
+                    }
+                    System.out.println("received request header, data payload has length " + reqDataLen);
+                    byte[] bytes_in = new byte[reqDataLen];
+                    din.readFully(bytes_in);
+                    int src = 0;
+                    int dest = 0;
+                    boolean isSrc = true;
+                    Graph g = new Graph();
+                    for (int i = 0; i < reqDataLen; i++) {
+                        int s = bytes_in[i] - '0';
+                        if (s == -16) {
+                            isSrc = false;
+                        } else if (s == -38) {
+                            g.addEdge(new Edge(src, dest));
+                            src = 0;
+                            dest = 0;
+                            isSrc = true;
                         } else {
-                            dest = dest*10 + s;
+                            if (isSrc) {
+                                src = src*10 + s;
+                            } else {
+                                dest = dest*10 + s;
+                            }
                         }
                     }
+                    HashMap<Integer, Integer> connectedComponents = g.connectedComponents();
+                    StringBuilder output = new StringBuilder();
+                    for (int vertex : connectedComponents.keySet()) {
+                        output.append(vertex + " " + connectedComponents.get(vertex) + "\n");
+                    }
+                    DataOutputStream dout = new DataOutputStream(csock.getOutputStream());
+                    byte[] bytes = output.toString().getBytes("UTF-8");
+                    dout.writeInt(bytes.length);
+                    dout.write(bytes);
+                    dout.flush();
                 }
-                HashMap<Integer, Integer> connectedComponents = g.connectedComponents();
-                StringBuilder output = new StringBuilder();
-                for (int vertex : connectedComponents.keySet()) {
-                    output.append(vertex + " " + connectedComponents.get(vertex) + "\n");
-                }
-                DataOutputStream dout = new DataOutputStream(csock.getOutputStream());
-                byte[] bytes = output.toString().getBytes("UTF-8");
-                dout.writeInt(bytes.length);
-                dout.write(bytes);
-                dout.flush();
+
             } catch (Exception e) {
                 e.printStackTrace();
             }
