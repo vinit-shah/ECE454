@@ -6,7 +6,6 @@ import java.util.HashSet;
 import java.util.HashMap;
 
 public class Graph {
-    private ArrayList<Edge> edges;
     private HashMap<Integer, Integer> ranks;
     private HashMap<Integer, Integer> roots;
     private HashMap<Integer, ArrayList<Integer>> subsets;
@@ -22,14 +21,12 @@ public class Graph {
     }
 
     public Graph() {
-        edges = new ArrayList<Edge>();
         ranks = new HashMap<Integer,Integer>();
         roots = new HashMap<Integer,Integer>();
         subsets = new HashMap<Integer, ArrayList<Integer>>();
     }
 
     public void addEdge(Edge edge) {
-        edges.add(edge);
         int srcId = edge.getSource();
         int destId = edge.getDestination();
         if (!ranks.containsKey(srcId)) ranks.put(srcId, 0);
@@ -44,6 +41,7 @@ public class Graph {
             ArrayList<Integer> arr = new ArrayList<Integer>();
             subsets.put(destId, arr);
         }
+        union(srcId, destId);
     }
 
     // find parent of vertex (path compression done here)
@@ -80,11 +78,6 @@ public class Graph {
 
     // return connected components
     public HashMap<Integer,Integer> connectedComponents() {
-        for (Edge edge : edges) {
-            int srcVertex = edge.getSource();
-            int destVertex = edge.getDestination();
-            union(srcVertex, destVertex);
-        }
         return roots;
     }
 }
