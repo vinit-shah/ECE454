@@ -17,12 +17,12 @@ class Struct {
 
 public class Graph {
     private HashMap<Integer, Struct> map;
-
     public Graph() {
         map = new HashMap<Integer, Struct>();
     }
 
     public void addEdge(Edge edge) {
+
         int srcId = edge.getSource();
         int destId = edge.getDestination();
         if(!map.containsKey(srcId)) map.put(srcId, new Struct(srcId,0));
@@ -34,7 +34,7 @@ public class Graph {
         int rootId = map.get(vertexId).rootId;
         if (rootId != vertexId) {
             Struct newRootId = findRoot(rootId);
-            map.replace(vertexId, newRootId);
+            map.put(vertexId, newRootId);
         }
         return map.get(vertexId);
     }
@@ -44,11 +44,12 @@ public class Graph {
         Struct yRoot = findRoot(y);
         if (xRoot.rootId != yRoot.rootId) {
             if (xRoot.rank < yRoot.rank) {
-                map.replace(xRoot.rootId, yRoot);
+                map.put(xRoot.rootId, yRoot);
             } else if (xRoot.rank > yRoot.rank) {
-                map.replace(yRoot.rootId, xRoot);
+                map.put(yRoot.rootId, xRoot);
             } else {
-                map.replace(yRoot.rootId, xRoot);
+                xRoot.rank++;
+                map.put(yRoot.rootId, xRoot);
             }
         }
     }

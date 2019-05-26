@@ -33,15 +33,28 @@ class CCServer {
                 DataInputStream din = new DataInputStream(csock.getInputStream());
                 int reqDataLen = din.readInt();     // read the next 4 bytes as an int
                 System.out.println("received request header, data payload has length " + reqDataLen);
-                BufferedReader in = new BufferedReader(new InputStreamReader(din, "UTF-8"));  // read as UTF-8
+                byte[] bytes_in = new byte[reqDataLen];
+                din.readFully(bytes_in);
+                int src = 0;
+                int dest = 0;
+                boolean isSrc = true;
                 Graph g = new Graph();
-                for (String line = in.readLine(); line != null; line = in.readLine()) {
-                    int src = Integer.parseInt(line.substring(0, line.indexOf(" ")));
-                    int dest = Integer.parseInt(line.substring(line.indexOf(" ") + 1, line.length()));
-                    g.addEdge(new Edge(src, dest));
-
-                    if (!in.ready())
-                        break;
+                for (int i = 0; i < reqDataLen; i++) {
+                    int s = bytes_in[i] - '0';
+                    if (s == -16) {
+                        isSrc = false;
+                    } else if (s == -38) {
+                        g.addEdge(new Edge(src, dest));
+                        src = 0;
+                        dest = 0;
+                        isSrc = true;
+                    } else {
+                        if (isSrc) {
+                            src = src*10 + s;
+                        } else {
+                            dest = dest*10 + s;
+                        }
+                    }
                 }
                 HashMap<Integer, Integer> connectedComponents = g.connectedComponents();
                 StringBuilder output = new StringBuilder();
