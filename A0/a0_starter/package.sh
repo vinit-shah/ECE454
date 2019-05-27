@@ -2,7 +2,7 @@
 
 FNAME=ece454a0.tar.gz
 
-tar -czf $FNAME *.java group.txt
+tar -czf $FNAME *.java group.txt helper
 
 echo
 echo Your tarball file name is: $FNAME
