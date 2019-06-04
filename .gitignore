@@ -1,1 +1,4 @@
+.idea/
+gen-java/
+*.class
 .DS_Store
