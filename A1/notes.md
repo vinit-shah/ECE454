@@ -1,0 +1,3 @@
+- Basically all the implementation we have to do is in BcryptServiceHandler.java
+- I added the registerBENode function which allows BENodes to register themselves with the FENode, the FENode will now have the hostname and port of each BENode, kept in backendNodes linkedlist, we'll have to make this a concurrentLinkedList something like that so it's thread safe later on
+- Basically what we'll have to do to offload work to the BE, is in the hashPassword and checkPassword functions, check to see if we have any backendNodes, if we do, launch a thread to connect to them via TSocket as a client and then launch that thread.

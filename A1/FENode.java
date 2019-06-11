@@ -6,7 +6,7 @@ import org.apache.thrift.protocol.TBinaryProtocol;
 import org.apache.thrift.server.TSimpleServer;
 import org.apache.thrift.transport.TServerSocket;
 import org.apache.thrift.transport.TFramedTransport;
-
+import org.apache.thrift.server.THsHaServer;
 
 public class FENode {
     static Logger log;
@@ -35,8 +35,7 @@ public class FENode {
         sargs.transportFactory(new TFramedTransport.Factory());
         sargs.processorFactory(new TProcessorFactory(processor));
         TSimpleServer server = new TSimpleServer(sargs);
-        server.serve();
 
-        // TODO: Part 2 - FE will also act as a client to the BENodes; forward the requests to the BE with proper load balance
+        server.serve();
     }
 }
