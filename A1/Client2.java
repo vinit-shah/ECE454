@@ -28,7 +28,7 @@ public class Client2 {
             for (int i = 0; i < 16; i++) {
                 password.add("Client2 " + i);
             }
-            List<String> hash = client.hashPassword(password, (short) 10);
+            List<String> hash = client.hashPassword(password, (short) 16);
             System.out.println(hash.toString());
             transport.close();
         } catch (TException x) {

@@ -87,7 +87,9 @@ public class BcryptServiceHandler implements BcryptService.Iface {
         };
         c.hashPasswordCompute(password, logRounds, callback);
         try {
-            return fut.get();
+            List<String> ret = fut.get();
+            backendNodes.add(node);
+            return ret;
         } catch (Exception e) {return null;}
     }
 
@@ -114,7 +116,9 @@ public class BcryptServiceHandler implements BcryptService.Iface {
         };
         c.checkPasswordCompute(password, hash, callback);
         try {
-            return fut.get();
+            List<Boolean> ret = fut.get();
+            backendNodes.add(node);
+            return ret;
         } catch (Exception e) {return null;}
     }
 
@@ -122,19 +126,24 @@ public class BcryptServiceHandler implements BcryptService.Iface {
         log.info("computing hash of " + password.toString());
         try {
             // Split up this work into various threads
-
-            int splitSize = 4;
+            log.info(password.size());
+            log.info(Math.ceil(password.size()/4.0));
+            double splitSize = 4.0;
 
             List<Future<List<String>>> workers = new LinkedList<>();
             // create a new thread for each split
-            for (int i = 0; i < Math.ceil(password.size() / splitSize); i += splitSize) {
-
+            for (int i = 0; i < Math.ceil(password.size() / splitSize); i ++) {
+                log.info("I:" + i);
                 List<String> passwords = new LinkedList<>();
-                for (int j = 0; j < splitSize; j++) {
-                    if (password.size() - 1 >= i)
-                        passwords.add(password.get(i));
-                    else
+                for (int j = i*(int)splitSize; j <  i*(int)splitSize + (int)splitSize; j++) {
+                    if (password.size() - 1 >= j) {
+                        log.info(j + " adding");
+                        passwords.add(password.get(j));
+                    }
+                    else {
+                        log.info("breaking");
                         break;
+                    }
                 }
 
                 Callable<List<String>> workerCallable = new Callable<List<String>>() {
