@@ -3,9 +3,7 @@ import java.util.List;
 import java.util.LinkedList;
 import java.util.Map;
 import java.util.HashMap;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.*;
 
 import org.apache.thrift.async.*;
 import org.apache.thrift.transport.*;
@@ -33,6 +31,8 @@ class BackendNode {
     }
 }
 
+
+
 public class BcryptServiceHandler implements BcryptService.Iface {
     private ConcurrentLinkedQueue<BackendNode> backendNodes;
     private TProtocolFactory protocolFactory;
@@ -40,16 +40,24 @@ public class BcryptServiceHandler implements BcryptService.Iface {
     private Map<BackendNode, BcryptService.AsyncClient> clients;
     private Map<BackendNode, TNonblockingTransport> transports;
     private Logger log;
+    private ExecutorService executor;
+
+    private static int NUM_OF_BE_THREADS;
 
     public BcryptServiceHandler() {
         log = Logger.getLogger(BcryptServiceHandler.class.getName());
         try {
             clientManager = new TAsyncClientManager();
-        } catch (Exception e) {}
+        } catch (Exception e) {
+            // TODO: Handle ClientManager initialization failure.
+        }
+
         backendNodes = new ConcurrentLinkedQueue<BackendNode>();
         protocolFactory = new TCompactProtocol.Factory();
         clients = new HashMap<BackendNode, BcryptService.AsyncClient>();
         transports = new HashMap<BackendNode, TNonblockingTransport>();
+        NUM_OF_BE_THREADS = BENode.NUM_OF_WORKER_THREADS;
+        executor = Executors.newFixedThreadPool(10);
     }
 
     public BackendNode getBENode() {
@@ -113,13 +121,44 @@ public class BcryptServiceHandler implements BcryptService.Iface {
     public List<String> hashPasswordCompute(List<String> password, short logRounds) throws IllegalArgument, org.apache.thrift.TException {
         log.info("computing hash of " + password.toString());
         try {
-            List<String> ret = new ArrayList<>();
-            for (String onePwd : password) {
-                String oneHash = BCrypt.hashpw(onePwd, BCrypt.gensalt(logRounds));
-                log.info(onePwd + " adding hassh");
-                ret.add(oneHash);
+            // Split up this work into various threads
+
+            int splitSize = 4;
+
+            List<Future<List<String>>> workers = new LinkedList<>();
+            // create a new thread for each split
+            for (int i = 0; i < Math.ceil(password.size() / splitSize); i += splitSize) {
+
+                List<String> passwords = new LinkedList<>();
+                for (int j = 0; j < splitSize; j++) {
+                    if (password.size() - 1 >= i)
+                        passwords.add(password.get(i));
+                    else
+                        break;
+                }
+
+                Callable<List<String>> workerCallable = new Callable<List<String>>() {
+                    @Override
+                    public List<String> call() throws Exception {
+                        List<String> ret = new ArrayList<>();
+                        for (String onePwd : passwords) {
+                            String oneHash = BCrypt.hashpw(onePwd, BCrypt.gensalt(logRounds));
+                            log.info(onePwd + " adding hash");
+                            ret.add(oneHash);
+                        }
+                        return ret;
+                    }
+                };
+
+                workers.add(executor.submit(workerCallable));
             }
-            return ret;
+
+            List<String> output = new LinkedList<>();
+            for (Future<List<String>> task : workers) {
+                output.addAll(task.get());
+            }
+
+            return output;
         } catch (Exception e) {
             throw new IllegalArgument(e.getMessage());
         }
