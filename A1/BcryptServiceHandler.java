@@ -3,13 +3,9 @@ import java.util.List;
 import java.util.LinkedList;
 import java.util.Map;
 import java.util.HashMap;
-import java.lang.Thread;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.Future;
+import java.util.concurrent.CompletableFuture;
 
 import org.apache.thrift.async.*;
 import org.apache.thrift.transport.*;
@@ -37,64 +33,13 @@ class BackendNode {
     }
 }
 
-class HashTask implements Callable {
-    private List<String> passwords;
-    private short logRounds;
-    private BcryptService.AsyncClient client;
-    private TNonblockingTransport transport;
-
-    public HashTask(List<String> passwords, short logRounds, BcryptService.AsyncClient client, TNonblockingTransport transport) {
-        this.passwords = passwords;
-        this.logRounds = logRounds;
-        this.client = client;
-        this.transport = transport;
-    }
-
-    @Override
-    public List<String> call() {
-        CountDownLatch latch = new CountDownLatch(1);
-        HashPasswordCallBack ca = new HashPasswordCallBack(latch);
-        try {
-            client.hashPasswordCompute(passwords, logRounds, ca);
-            latch.await();
-        } catch (Exception e) {}
-        return ca.getResponse();
-    }
-}
-
-class HashPasswordCallBack implements AsyncMethodCallback<List<String>> {
-    private List<String> response;
-    private CountDownLatch latch;
-
-    public HashPasswordCallBack(CountDownLatch latch) {
-        this.latch = latch;
-    }
-
-    public void onComplete(List<String> response) {
-        this.response = response;
-        latch.countDown();
-    }
-
-    public void onError(Exception e) {
-        e.printStackTrace();
-        latch.countDown();
-    }
-
-    public List<String> getResponse() {
-        return this.response;
-    }
-}
-
-
 public class BcryptServiceHandler implements BcryptService.Iface {
     private ConcurrentLinkedQueue<BackendNode> backendNodes;
     private TProtocolFactory protocolFactory;
     private TAsyncClientManager clientManager;
     private Map<BackendNode, BcryptService.AsyncClient> clients;
-    // private Map<BackendNode, BcryptService.Client> clients;
     private Map<BackendNode, TNonblockingTransport> transports;
     private Logger log;
-    private ExecutorService executor;
 
     public BcryptServiceHandler() {
         log = Logger.getLogger(BcryptServiceHandler.class.getName());
@@ -105,7 +50,6 @@ public class BcryptServiceHandler implements BcryptService.Iface {
         protocolFactory = new TCompactProtocol.Factory();
         clients = new HashMap<BackendNode, BcryptService.AsyncClient>();
         transports = new HashMap<BackendNode, TNonblockingTransport>();
-        executor = Executors.newFixedThreadPool(4);
     }
 
     public BackendNode getBENode() {
@@ -118,45 +62,52 @@ public class BcryptServiceHandler implements BcryptService.Iface {
             return hashPasswordCompute(password, logRounds);
         }
         log.info("sending to BENode " + node.getHostName() + ":" + node.getPort());
-        log.info("list is: " + password.toString());
         BcryptService.AsyncClient c = clients.get(node);
         TNonblockingTransport t = transports.get(node);
-        CompletableFuture<List<String>> ret;
-        AsyncMethodCallback<List<String>> a = new AsyncMethodCallback<List<String>> () {
-            public void onComplete() {
+        CompletableFuture<List<String>> fut = new CompletableFuture<List<String>>();
+        AsyncMethodCallback<List<String>> callback = new AsyncMethodCallback<List<String>>() {
 
+            @Override
+            public void onComplete(List<String> response) {
+                fut.complete(response);
             }
-        }
-        // Callable<List<String>> callable = new HashTask(password, logRounds, c, t);
-        // Future<List<String>> fut = executor.submit(callable);
-        // List<String> ret = null;
-        // try {
-        //     ret = fut.get();
-        // } catch (Exception e){}
-        // backendNodes.add(node);
-        // return ret;
+
+            @Override
+            public void onError(Exception e) {
+                e.printStackTrace();
+            }
+        };
+        c.hashPasswordCompute(password, logRounds, callback);
+        try {
+            return fut.get();
+        } catch (Exception e) {return null;}
     }
 
     public List<Boolean> checkPassword(List<String> password, List<String> hash) throws IllegalArgument, org.apache.thrift.TException {
-        // BackendNode node = getBENode();
-        // if (node == null) {
-        //     return checkPasswordCompute(password, hash);
-        // }
-        // BcryptService.AsyncClient ac = clients.get(node);
-        // CountDownLatch latch = new CountDownLatch(1);
-        // CheckPasswordCallBack ret = new CheckPasswordCallBack(latch);
-        // ac.checkPasswordCompute(password, hash, ret);
-        // try {
-        //     latch.await();
-        // }   catch (InterruptedException e) {
-        //     System.out.println("Latch exception");
-        // }
-        // TNonblockingTransport t = transports.get(node);
-        //
-        // // After node has finished computing, return to the queue to be used for other computations
-        // backendNodes.add(node);
-        // return ret.getResponse();
-        return null;
+        BackendNode node = backendNodes.poll();
+        if (node == null) {
+            return checkPasswordCompute(password, hash);
+        }
+        log.info("sending to BENode " + node.getHostName() + ":" + node.getPort());
+        BcryptService.AsyncClient c = clients.get(node);
+        TNonblockingTransport t = transports.get(node);
+        CompletableFuture<List<Boolean>> fut = new CompletableFuture<List<Boolean>>();
+        AsyncMethodCallback<List<Boolean>> callback = new AsyncMethodCallback<List<Boolean>>() {
+
+            @Override
+            public void onComplete(List<Boolean> response) {
+                fut.complete(response);
+            }
+
+            @Override
+            public void onError(Exception e) {
+                e.printStackTrace();
+            }
+        };
+        c.checkPasswordCompute(password, hash, callback);
+        try {
+            return fut.get();
+        } catch (Exception e) {return null;}
     }
 
     public List<String> hashPasswordCompute(List<String> password, short logRounds) throws IllegalArgument, org.apache.thrift.TException {
@@ -203,29 +154,4 @@ public class BcryptServiceHandler implements BcryptService.Iface {
         } catch (Exception e) {
         }
     }
-
-
-    //
-    // class CheckPasswordCallBack implements AsyncMethodCallback<List<Boolean>> {
-    //     private CountDownLatch latch;
-    //     private List<Boolean> response;
-    //
-    //     public CheckPasswordCallBack(CountDownLatch latch) {
-    //         this.latch = latch;
-    //     }
-    //
-    //     public void onComplete(List<Boolean> response) {
-    //         this.response = response;
-    //         latch.countDown();
-    //     }
-    //
-    //     public void onError(Exception e) {
-    //         e.printStackTrace();
-    //         latch.countDown();
-    //     }
-    //
-    //     public List<Boolean> getResponse() {
-    //         return this.response;
-    //     }
-    // }
 }
