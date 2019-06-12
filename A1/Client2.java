@@ -25,11 +25,15 @@ public class Client2 {
 
             List<String> password = new ArrayList<>();
             password.add(args[2]);
-            for (int i = 0; i < 16; i++) {
+            for (int i = 0; i < 127; i++) {
                 password.add("Client2 " + i);
             }
-            List<String> hash = client.hashPassword(password, (short) 16);
-            System.out.println(hash.toString());
+
+            long x = System.currentTimeMillis();
+            List<String> hash = client.hashPassword(password, (short) 10);
+            System.out.println(System.currentTimeMillis() - x);
+            // List<Boolean> check = client.checkPassword(password, hash);
+            // System.out.println(check.toString());
             transport.close();
         } catch (TException x) {
             x.printStackTrace();

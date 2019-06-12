@@ -31,8 +31,6 @@ class BackendNode {
     }
 }
 
-
-
 public class BcryptServiceHandler implements BcryptService.Iface {
     private ConcurrentLinkedQueue<BackendNode> backendNodes;
     private TProtocolFactory protocolFactory;
@@ -42,22 +40,19 @@ public class BcryptServiceHandler implements BcryptService.Iface {
     private Logger log;
     private ExecutorService executor;
 
-    private static int NUM_OF_BE_THREADS;
-
     public BcryptServiceHandler() {
         log = Logger.getLogger(BcryptServiceHandler.class.getName());
         try {
             clientManager = new TAsyncClientManager();
         } catch (Exception e) {
-            // TODO: Handle ClientManager initialization failure.
+            e.printStackTrace();
         }
 
         backendNodes = new ConcurrentLinkedQueue<BackendNode>();
         protocolFactory = new TCompactProtocol.Factory();
         clients = new HashMap<BackendNode, BcryptService.AsyncClient>();
         transports = new HashMap<BackendNode, TNonblockingTransport>();
-        NUM_OF_BE_THREADS = BENode.NUM_OF_WORKER_THREADS;
-        executor = Executors.newFixedThreadPool(10);
+        executor = Executors.newFixedThreadPool(32);
     }
 
     public BackendNode getBENode() {
@@ -65,83 +60,118 @@ public class BcryptServiceHandler implements BcryptService.Iface {
     }
 
     public List<String> hashPassword(List<String> password, short logRounds) throws IllegalArgument, org.apache.thrift.TException {
-        BackendNode node = backendNodes.poll();
-        if (node == null ) {
-            return hashPasswordCompute(password, logRounds);
+        if (logRounds < 4 || logRounds > 31) {
+            throw new IllegalArgument("Bad logRounds");
         }
-        log.info("sending to BENode " + node.getHostName() + ":" + node.getPort());
-        BcryptService.AsyncClient c = clients.get(node);
-        TNonblockingTransport t = transports.get(node);
-        CompletableFuture<List<String>> fut = new CompletableFuture<List<String>>();
-        AsyncMethodCallback<List<String>> callback = new AsyncMethodCallback<List<String>>() {
+        if (password.isEmpty()) {
+            throw new IllegalArgument("Empty list of passwords");
+        }
+        while (true) {
+            CompletableFuture<List<String>> fut = new CompletableFuture<List<String>>();
+            AsyncMethodCallback<List<String>> callback = new AsyncMethodCallback<List<String>>() {
 
-            @Override
-            public void onComplete(List<String> response) {
-                fut.complete(response);
-            }
+                @Override
+                public void onComplete(List<String> response) {
+                    fut.complete(response);
+                }
 
-            @Override
-            public void onError(Exception e) {
-                e.printStackTrace();
+                @Override
+                public void onError(Exception e) {
+                    log.info("Failed within hashPassword");
+                    fut.completeExceptionally(e);
+                }
+            };
+            BackendNode node = backendNodes.poll();
+            if (node == null) {
+                log.info("Computing on the front end");
+                return hashPasswordCompute(password, logRounds);
             }
-        };
-        c.hashPasswordCompute(password, logRounds, callback);
-        try {
-            List<String> ret = fut.get();
-            backendNodes.add(node);
-            return ret;
-        } catch (Exception e) {return null;}
+            log.info("sending to BENode " + node.getHostName() + ":" + node.getPort());
+            BcryptService.AsyncClient c = clients.get(node);
+            TNonblockingTransport t = transports.get(node);
+            c.hashPasswordCompute(password, logRounds, callback);
+            try {
+                List<String> ret = fut.get();
+                backendNodes.add(node);
+                return ret;
+            } catch (Exception e) {
+                log.info("Failed within future.get in hashPassword");
+                if (t.isOpen()) {
+                    log.info("Backend Node " + node.getHostName() + ":" + node.getPort() + " is still open");
+                    backendNodes.add(node);
+                } else {
+                    log.info("Backend Node " + node.getHostName() + ":" + node.getPort() + " is not open");
+                    clients.remove(node);
+                    transports.remove(node);
+                }
+
+            }
+        }
     }
 
     public List<Boolean> checkPassword(List<String> password, List<String> hash) throws IllegalArgument, org.apache.thrift.TException {
-        BackendNode node = backendNodes.poll();
-        if (node == null) {
-            return checkPasswordCompute(password, hash);
+        if (password.isEmpty()) {
+            throw new IllegalArgument("Empty list of passwords");
         }
-        log.info("sending to BENode " + node.getHostName() + ":" + node.getPort());
-        BcryptService.AsyncClient c = clients.get(node);
-        TNonblockingTransport t = transports.get(node);
-        CompletableFuture<List<Boolean>> fut = new CompletableFuture<List<Boolean>>();
-        AsyncMethodCallback<List<Boolean>> callback = new AsyncMethodCallback<List<Boolean>>() {
-
-            @Override
-            public void onComplete(List<Boolean> response) {
-                fut.complete(response);
+        if (hash.isEmpty()) {
+            throw new IllegalArgument("Empty list of hashes");
+        }
+        while(true) {
+            BackendNode node = backendNodes.poll();
+            if (node == null) {
+                log.info("Checking password on the front end");
+                return checkPasswordCompute(password, hash);
             }
+            log.info("sending to BENode " + node.getHostName() + ":" + node.getPort());
+            BcryptService.AsyncClient c = clients.get(node);
+            TNonblockingTransport t = transports.get(node);
+            CompletableFuture<List<Boolean>> fut = new CompletableFuture<List<Boolean>>();
+            AsyncMethodCallback<List<Boolean>> callback = new AsyncMethodCallback<List<Boolean>>() {
 
-            @Override
-            public void onError(Exception e) {
-                e.printStackTrace();
+                @Override
+                public void onComplete(List<Boolean> response) {
+                    fut.complete(response);
+                }
+
+                @Override
+                public void onError(Exception e) {
+                    log.info("Failed within checkPassword");
+                    fut.completeExceptionally(e);
+                }
+            };
+            c.checkPasswordCompute(password, hash, callback);
+            try {
+                List<Boolean> ret = fut.get();
+                backendNodes.add(node);
+                return ret;
+            } catch (Exception e) {
+                log.info("Failed within future.get in checkPassword");
+                if (t.isOpen()) {
+                    log.info("Backend Node " + node.getHostName() + ":" + node.getPort() + " is still open");
+                    backendNodes.add(node);
+                } else {
+                    log.info("Backend Node " + node.getHostName() + ":" + node.getPort() + " is not open");
+                    clients.remove(node);
+                    transports.remove(node);
+                }
             }
-        };
-        c.checkPasswordCompute(password, hash, callback);
-        try {
-            List<Boolean> ret = fut.get();
-            backendNodes.add(node);
-            return ret;
-        } catch (Exception e) {return null;}
+        }
     }
 
     public List<String> hashPasswordCompute(List<String> password, short logRounds) throws IllegalArgument, org.apache.thrift.TException {
-        log.info("computing hash of " + password.toString());
+        log.info("computing hash");
         try {
-            // Split up this work into various threads
-            log.info(password.size());
-            log.info(Math.ceil(password.size()/4.0));
             double splitSize = 4.0;
 
             List<Future<List<String>>> workers = new LinkedList<>();
             // create a new thread for each split
             for (int i = 0; i < Math.ceil(password.size() / splitSize); i ++) {
-                log.info("I:" + i);
                 List<String> passwords = new LinkedList<>();
                 for (int j = i*(int)splitSize; j <  i*(int)splitSize + (int)splitSize; j++) {
                     if (password.size() - 1 >= j) {
-                        log.info(j + " adding");
                         passwords.add(password.get(j));
                     }
                     else {
-                        log.info("breaking");
                         break;
                     }
                 }
@@ -151,8 +181,8 @@ public class BcryptServiceHandler implements BcryptService.Iface {
                     public List<String> call() throws Exception {
                         List<String> ret = new ArrayList<>();
                         for (String onePwd : passwords) {
+                            log.info("Hashing: " + onePwd);
                             String oneHash = BCrypt.hashpw(onePwd, BCrypt.gensalt(logRounds));
-                            log.info(onePwd + " adding hash");
                             ret.add(oneHash);
                         }
                         return ret;
@@ -174,17 +204,56 @@ public class BcryptServiceHandler implements BcryptService.Iface {
     }
 
     public List<Boolean> checkPasswordCompute(List<String> password, List<String> hash) throws IllegalArgument, org.apache.thrift.TException {
+        log.info("checking password hashes");
         try {
-            List<Boolean> ret = new ArrayList<>();
-            if (password.size() != hash.size()) {
-                throw new IllegalArgument("password and hash lists were not same length");
+            double splitSize = 4.0;
+
+            List<Future<List<Boolean>>> workers = new LinkedList<>();
+            // create a new thread for each split
+            for (int i = 0; i < Math.ceil(password.size() / splitSize); i ++) {
+                log.info("I:" + i);
+                List<String> passwords = new LinkedList<>();
+                List<String> hashes = new LinkedList<>();
+                for (int j = i*(int)splitSize; j <  i*(int)splitSize + (int)splitSize; j++) {
+                    if (password.size() - 1 >= j) {
+                        passwords.add(password.get(j));
+                        hashes.add(hash.get(j));
+                    }
+                    else {
+                        break;
+                    }
+                }
+
+                Callable<List<Boolean>> workerCallable = new Callable<List<Boolean>>() {
+                    @Override
+                    public List<Boolean> call() throws Exception {
+                        List<Boolean> ret = new ArrayList<>();
+                        for (int i = 0; i < passwords.size(); i++) {
+                            String onePwd = passwords.get(i);
+                            String oneHash = hashes.get(i);
+                            try {
+                                ret.add(BCrypt.checkpw(onePwd, oneHash));
+                            } catch (IllegalArgumentException e) {
+                                log.info("MALFORMED HASH");
+                                ret.add(false);
+                            } catch (Exception e) {
+                                e.printStackTrace();
+                                ret.add(false);
+                            }
+                        }
+                        return ret;
+                    }
+                };
+
+                workers.add(executor.submit(workerCallable));
             }
-            for (int i = 0; i < password.size(); i++) {
-                String onePwd = password.get(i);
-                String oneHash = hash.get(i);
-                ret.add(BCrypt.checkpw(onePwd, oneHash));
+
+            List<Boolean> output = new LinkedList<>();
+            for (Future<List<Boolean>> task : workers) {
+                output.addAll(task.get());
             }
-            return ret;
+
+            return output;
         } catch (Exception e) {
             throw new IllegalArgument(e.getMessage());
         }
