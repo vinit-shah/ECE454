@@ -9,7 +9,7 @@ import org.apache.thrift.transport.TSocket;
 import org.apache.thrift.transport.TFramedTransport;
 import org.apache.thrift.transport.TTransportFactory;
 
-public class Client {
+public class Client2 {
     public static void main(String[] args) {
         if (args.length != 3) {
             System.err.println("Usage: java Client FE_host FE_port password");
@@ -26,7 +26,7 @@ public class Client {
             List<String> password = new ArrayList<>();
             password.add(args[2]);
             for (int i = 0; i < 16; i++) {
-                password.add("testingpassword " + i);
+                password.add("Client2 " + i);
             }
             List<String> hash = client.hashPassword(password, (short) 10);
             System.out.println(hash.toString());

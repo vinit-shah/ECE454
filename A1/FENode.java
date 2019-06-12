@@ -7,8 +7,12 @@ import org.apache.thrift.server.TSimpleServer;
 import org.apache.thrift.transport.TServerSocket;
 import org.apache.thrift.transport.TFramedTransport;
 import org.apache.thrift.server.THsHaServer;
+import org.apache.thrift.server.TServer;
+import org.apache.thrift.transport.TNonblockingServerSocket;
+import org.apache.thrift.protocol.TProtocol;
 
 public class FENode {
+    //test
     static Logger log;
 
     public static void main(String[] args) throws Exception {
@@ -23,19 +27,15 @@ public class FENode {
 
         int portFE = Integer.parseInt(args[0]);
         log.info("Launching FE node on port " + portFE);
-
-        // TODO: Discover any available BENodes that we can forward requests to
-
-        // Part 1 - FE will act as a server for the client; get the RPC requests from client
         // launch Thrift server
         BcryptService.Processor processor = new BcryptService.Processor<BcryptService.Iface>(new BcryptServiceHandler());
-        TServerSocket socket = new TServerSocket(portFE);
-        TSimpleServer.Args sargs = new TSimpleServer.Args(socket);
+
+        TNonblockingServerSocket socket = new TNonblockingServerSocket(portFE);
+        THsHaServer.Args sargs = new THsHaServer.Args(socket);
         sargs.protocolFactory(new TBinaryProtocol.Factory());
         sargs.transportFactory(new TFramedTransport.Factory());
         sargs.processorFactory(new TProcessorFactory(processor));
-        TSimpleServer server = new TSimpleServer(sargs);
-
+        TServer server = new THsHaServer(sargs);
         server.serve();
     }
 }
