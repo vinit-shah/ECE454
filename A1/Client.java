@@ -26,6 +26,7 @@ public class Client {
             List<Callable<List<String>>> workers = new LinkedList<>();
             long x = System.currentTimeMillis();
             for (int i = 0; i < threadNums; i++) {
+                final int j = i;
                 TSocket sock = new TSocket(args[0], Integer.parseInt(args[1]));
                 TTransport transport = new TFramedTransport(sock);
                 transports.add(transport);
@@ -39,11 +40,11 @@ public class Client {
                     @Override
                     public List<String> call() throws Exception {
                         List<String> password = new ArrayList<>();
-                        password.add(args[2]);
-                        password.add(args[2]);
-                        password.add(args[2]);
-                        password.add(args[2]);
-                        List<String> hash = client.hashPassword(password, (short) 16);
+                        password.add(j + " password");
+                        password.add(j + " second password");
+                        password.add(j + " third password");
+                        password.add(j + " fourth password");
+                        List<String> hash = client.hashPassword(password, (short) 12);
                         System.out.println(hash.get(0));
                         return hash;
                     }
@@ -76,8 +77,10 @@ public class Client {
 //            }
 
             for (TTransport transport : transports) {
+                System.out.println("Closing transport");
                 transport.close();
             }
+            System.out.println("DONE THE CLIENT CODE");
         } catch (TException x) {
             x.printStackTrace();
         } catch (Exception e) {
