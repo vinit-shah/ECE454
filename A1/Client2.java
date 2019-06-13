@@ -32,8 +32,8 @@ public class Client2 {
             long x = System.currentTimeMillis();
             List<String> hash = client.hashPassword(password, (short) 10);
             System.out.println(System.currentTimeMillis() - x);
-            // List<Boolean> check = client.checkPassword(password, hash);
-            // System.out.println(check.toString());
+             List<Boolean> check = client.checkPassword(password, hash);
+             System.out.println(check.toString());
             transport.close();
         } catch (TException x) {
             x.printStackTrace();
