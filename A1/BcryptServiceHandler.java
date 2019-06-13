@@ -13,19 +13,34 @@ import org.mindrot.jbcrypt.BCrypt;
 
 import org.apache.log4j.Logger;
 
+class ClientTransportPair {
+    private BcryptService.AsyncClient client;
+    private TNonblockingTransport transport;
+    public ClientTransportPair(BcryptService.AsyncClient client, TNonblockingTransport transport) {
+        this.client = client;
+        this.transport = transport;
+    }
+
+    public BcryptService.AsyncClient getClient() {
+        return this.client;
+    }
+
+    public TNonblockingTransport getTransport() {
+        return this.transport;
+    }
+}
+
 class BackendNode {
     private String hostname;
     private int port;
-    private List<BcryptService.AsyncClient> clients;
-    private List<TNonblockingTransport> transports;
+    private ConcurrentHashMap<ClientTransportPair, Boolean> clientsAndTransports;
     private int numRequests;
     final private int MAX_REQUESTS = 4;
 
-    BackendNode(String hostname, int port, List<BcryptService.AsyncClient> clients, List<TNonblockingTransport> transports) {
+    BackendNode(String hostname, int port, ConcurrentHashMap<ClientTransportPair, Boolean> clientsAndTransports) {
         this.hostname = hostname;
         this.port = port;
-        this.clients = clients;
-        this.transports = transports;
+        this.clientsAndTransports = clientsAndTransports;
         this.numRequests = 0;
     }
 
@@ -37,34 +52,25 @@ class BackendNode {
         return this.port;
     }
 
-    public void incrementRequests() {
+    public synchronized void incrementRequests() {
         this.numRequests++;
     }
 
-    public void decrementRequests() {
+    public synchronized  void decrementRequests(ClientTransportPair cp) {
         this.numRequests--;
+        this.clientsAndTransports.put(cp,false); // set the client as false so we know no one is currently using it
     }
 
-    public int getNumRequests() {
+    public synchronized int getNumRequests() {
         return this.numRequests;
     }
 
-    public BcryptService.AsyncClient getAsyncClient() {
-        if (this.numRequests <= MAX_REQUESTS) {
-            // if we can serve requests, return the first client in the list, this one will be avalable and then re add it to the end of the list
-            BcryptService.AsyncClient client = clients.remove(0);
-            clients.add(client);
-            return client;
-        }
-        return null;
-    }
-
-    public TNonblockingTransport getTNonBlockingTransport() {
-        if (this.numRequests <= MAX_REQUESTS) {
-            // if we can serve requests, return the first transport in the list, this one will be avalable and then re add it to the end of the list
-            TNonblockingTransport transport = transports.remove(0);
-            transports.add(transport);
-            return transport;
+    public synchronized ClientTransportPair getClientTransportPair() {
+        for (Map.Entry<ClientTransportPair, Boolean> entry : clientsAndTransports.entrySet()) {
+            if (entry.getValue() == false) { // this client is not busy
+                clientsAndTransports.put(entry.getKey(), true);
+                return entry.getKey();
+            }
         }
         return null;
     }
@@ -91,7 +97,7 @@ public class BcryptServiceHandler implements BcryptService.Iface {
         executor = Executors.newFixedThreadPool(32);
     }
 
-    public BackendNode getBENode() {
+    public synchronized BackendNode getBENode() {
         BackendNode node = backendNodes.poll();
         // get 4 tries to find a node that can take on another request, if they're still busy then return null and compute in the front end
         for (int i = 0; i < 4; i ++) {
@@ -133,33 +139,35 @@ public class BcryptServiceHandler implements BcryptService.Iface {
                     fut.completeExceptionally(e);
                 }
             };
-            // BackendNode node = backendNodes.poll();
             BackendNode node = getBENode();
             if (node == null) {
                 log.info("Computing on the front end");
                 return hashPasswordCompute(password, logRounds);
             }
-            log.info("sending to BENode " + node.getHostName() + ":" + node.getPort());
-            BcryptService.AsyncClient c = node.getAsyncClient();
-            TNonblockingTransport t = node.getTNonBlockingTransport();
-            c.hashPasswordCompute(password, logRounds, callback);
-            try {
-                List<String> ret = fut.get();
-                node.decrementRequests();
-                log.info("DECREMENT: Node: " + node.getHostName() + ":" + node.getPort() + " now has has " + node.getNumRequests() + " requests");
-                return ret;
-            } catch (Exception e) {
-                log.info("Failed within future.get in hashPassword");
-                if (t.isOpen()) {
-                    log.info("Backend Node " + node.getHostName() + ":" + node.getPort() + " is still open");
-                    node.decrementRequests();
+            ClientTransportPair cp = node.getClientTransportPair(); // get an available client
+            if (cp != null) {
+                log.info("sending to BENode " + node.getHostName() + ":" + node.getPort());
+                BcryptService.AsyncClient c = cp.getClient();
+                TNonblockingTransport t = cp.getTransport();
+                c.hashPasswordCompute(password, logRounds, callback);
+                try {
+                    List<String> ret = fut.get();
+                    node.decrementRequests(cp);
                     log.info("DECREMENT: Node: " + node.getHostName() + ":" + node.getPort() + " now has has " + node.getNumRequests() + " requests");
-                } else {
-                    log.info("Backend Node " + node.getHostName() + ":" + node.getPort() + " is not open");
-                    backendNodes.remove(node);
-                    log.info("REMOVE: Node " + node.getHostName() + ":" + node.getPort());
-                }
+                    return ret;
+                } catch (Exception e) {
+                    log.info("Failed within future.get in hashPassword");
+                    if (t.isOpen()) {
+                        log.info("Backend Node " + node.getHostName() + ":" + node.getPort() + " is still open");
+                        node.decrementRequests(cp);
+                        log.info("DECREMENT: Node: " + node.getHostName() + ":" + node.getPort() + " now has has " + node.getNumRequests() + " requests");
+                    } else {
+                        log.info("Backend Node " + node.getHostName() + ":" + node.getPort() + " is not open");
+                        backendNodes.remove(node);
+                        log.info("REMOVE: Node " + node.getHostName() + ":" + node.getPort());
+                    }
 
+                }
             }
         }
     }
@@ -172,14 +180,6 @@ public class BcryptServiceHandler implements BcryptService.Iface {
             throw new IllegalArgument("Empty list of hashes");
         }
         while(true) {
-            BackendNode node = getBENode();
-            if (node == null) {
-                log.info("Checking password on the front end");
-                return checkPasswordCompute(password, hash);
-            }
-            log.info("sending to BENode " + node.getHostName() + ":" + node.getPort());
-            BcryptService.AsyncClient c = node.getAsyncClient();
-            TNonblockingTransport t = node.getTNonBlockingTransport();
             CompletableFuture<List<Boolean>> fut = new CompletableFuture<List<Boolean>>();
             AsyncMethodCallback<List<Boolean>> callback = new AsyncMethodCallback<List<Boolean>>() {
 
@@ -194,22 +194,34 @@ public class BcryptServiceHandler implements BcryptService.Iface {
                     fut.completeExceptionally(e);
                 }
             };
-            c.checkPasswordCompute(password, hash, callback);
-            try {
-                List<Boolean> ret = fut.get();
-                node.decrementRequests();
-                log.info("DECREMENT: Node: " + node.getHostName() + ":" + node.getPort() + " now has has " + node.getNumRequests() + " requests");
-                return ret;
-            } catch (Exception e) {
-                log.info("Failed within future.get in checkPassword");
-                if (t.isOpen()) {
-                    log.info("Backend Node " + node.getHostName() + ":" + node.getPort() + " is still open");
-                    node.decrementRequests();
+            BackendNode node = getBENode();
+            if (node == null) {
+                log.info("Computing on the front end");
+                return checkPasswordCompute(password, hash);
+            }
+            ClientTransportPair cp = node.getClientTransportPair(); // get an available client
+            if (cp != null) {
+                log.info("sending to BENode " + node.getHostName() + ":" + node.getPort());
+                BcryptService.AsyncClient c = cp.getClient();
+                TNonblockingTransport t = cp.getTransport();
+                c.checkPasswordCompute(password, hash, callback);
+                try {
+                    List<Boolean> ret = fut.get();
+                    node.decrementRequests(cp);
                     log.info("DECREMENT: Node: " + node.getHostName() + ":" + node.getPort() + " now has has " + node.getNumRequests() + " requests");
-                } else {
-                    log.info("Backend Node " + node.getHostName() + ":" + node.getPort() + " is not open");
-                    backendNodes.remove(node);
-                    log.info("REMOVE: Node " + node.getHostName() + ":" + node.getPort());
+                    return ret;
+                } catch (Exception e) {
+                    log.info("Failed within future.get in hashPassword");
+                    if (t.isOpen()) {
+                        log.info("Backend Node " + node.getHostName() + ":" + node.getPort() + " is still open");
+                        node.decrementRequests(cp);
+                        log.info("DECREMENT: Node: " + node.getHostName() + ":" + node.getPort() + " now has has " + node.getNumRequests() + " requests");
+                    } else {
+                        log.info("Backend Node " + node.getHostName() + ":" + node.getPort() + " is not open");
+                        backendNodes.remove(node);
+                        log.info("REMOVE: Node " + node.getHostName() + ":" + node.getPort());
+                    }
+
                 }
             }
         }
@@ -319,15 +331,14 @@ public class BcryptServiceHandler implements BcryptService.Iface {
     public void registerBENode(String hostname, int portNumber) throws IllegalArgument, org.apache.thrift.TException {
         try {
             log.info("registering BE Node on " + hostname + ":" + portNumber);
-            List<BcryptService.AsyncClient> listOfClients = new ArrayList<>();
-            List<TNonblockingTransport> listOfTransports = new ArrayList<>();
+            ConcurrentHashMap<ClientTransportPair, Boolean> clientsAndTransports = new ConcurrentHashMap<ClientTransportPair, Boolean>();
             for (int i = 0; i < MAX_REQUESTS; i ++) {
                 TNonblockingTransport transport = new TNonblockingSocket(hostname, portNumber);
                 BcryptService.AsyncClient client = new BcryptService.AsyncClient(protocolFactory, clientManager, transport);
-                listOfClients.add(client);
-                listOfTransports.add(transport);
+                ClientTransportPair cp = new ClientTransportPair(client, transport);
+                clientsAndTransports.put(cp, false);
             }
-            BackendNode node = new BackendNode(hostname, portNumber, listOfClients, listOfTransports);
+            BackendNode node = new BackendNode(hostname, portNumber, clientsAndTransports);
             backendNodes.add(node);
         } catch (Exception e) {
         }
