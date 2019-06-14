@@ -211,7 +211,7 @@ public class BcryptServiceHandler implements BcryptService.Iface {
                     log.info("DECREMENT: Node: " + node.getHostName() + ":" + node.getPort() + " now has has " + node.getNumRequests() + " requests");
                     return ret;
                 } catch (Exception e) {
-                    log.info("Failed within future.get in hashPassword");
+                    log.info("Failed within future.get in checkPassword");
                     if (t.isOpen()) {
                         log.info("Backend Node " + node.getHostName() + ":" + node.getPort() + " is still open");
                         node.decrementRequests(cp);
