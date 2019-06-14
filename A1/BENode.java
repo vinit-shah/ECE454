@@ -1,7 +1,6 @@
 import java.net.InetAddress;
 import java.net.Socket;
 
-import BcryptService;
 import org.apache.log4j.BasicConfigurator;
 import org.apache.log4j.Logger;
 
@@ -15,7 +14,8 @@ import org.apache.thrift.transport.TNonblockingServerSocket;
 import org.apache.thrift.transport.TServerSocket;
 import org.apache.thrift.transport.TFramedTransport;
 import org.apache.thrift.transport.TTransport;
-
+import org.apache.thrift.transport.TSocket;
+import org.apache.thrift.protocol.TProtocol;
 
 public class BENode {
     static Logger log;
@@ -36,6 +36,21 @@ public class BENode {
         int portBE = Integer.parseInt(args[2]);
         log.info("Launching BE node on port " + portBE + " at host " + getHostName());
 
+        // Connect BENode to FENode
+        TSocket sock = new TSocket(hostFE, portFE);
+        TTransport transport = new TFramedTransport(sock);
+        TProtocol protocol = new TBinaryProtocol(transport);
+        BcryptService.Client client = new BcryptService.Client(protocol);
+        Boolean isConnected = false;
+        while (!isConnected) {
+            try {
+                transport.open();
+                isConnected = true;
+                client.registerBENode(getHostName(), portBE);
+                transport.close();
+            } catch (Exception e) {}
+        }
+
         // launch Thrift server
         BcryptService.Processor processor = new BcryptService.Processor<BcryptService.Iface>(new BcryptServiceHandler());
 
@@ -53,14 +68,6 @@ public class BENode {
 
         TServer server = new THsHaServer(sargs);
         server.serve();
-
-        // TODO: Contact the FE layer to alert it that this new node is alive ready to serve
-//        while (true) {
-//            TTransport sc = socket.accept();
-//            while (sc.peek()) {
-//                sc.write("Connected");
-//            }
-//        }
     }
 
     static String getHostName() {
