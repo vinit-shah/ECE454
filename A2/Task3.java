@@ -37,9 +37,6 @@ public class Task3 {
                     context.write(user, zero);
                 }
             }
-
-            // If any empty user entries
-//            for (int i = )
         }
     }
 
