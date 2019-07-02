@@ -17,7 +17,7 @@ echo --- Jarring
 $JAVA_HOME/bin/jar -cf Task4.jar Task4*.class
 
 echo --- Running
-INPUT=/tmp/smalldata.txt
+INPUT=hdfs:///a2_inputs/in1.txt
 OUTPUT=/user/${USER}/a2_starter_code_output/
 
 hdfs dfs -rm -R $OUTPUT
