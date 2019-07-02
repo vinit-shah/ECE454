@@ -75,10 +75,8 @@ public class Task4 {
     public static void main(String[] args) throws Exception {
         Configuration conf = new Configuration();
         conf.set("mapreduce.output.textoutputformat.separator", ",");
-//        DistributedCache.addCacheFile(new URI(otherArgs[0]), conf);
 
         String[] otherArgs = new GenericOptionsParser(conf, args).getRemainingArgs();
-        // add code here
         if (otherArgs.length != 2) {
             System.err.println("Usage: Task4 <in> <out>");
             System.exit(2);
@@ -92,7 +90,7 @@ public class Task4 {
         job.setReducerClass(IntSumReducer.class);
         job.setOutputKeyClass(Text.class);
         job.setOutputValueClass(IntWritable.class);
-        job.addCacheFile(new URI(otherArgs[0]));
+        job.addCacheFile(new URI(otherArgs[0]));        // add to the cache
 
         TextInputFormat.addInputPath(job, new Path(otherArgs[0]));
         TextOutputFormat.setOutputPath(job, new Path(otherArgs[1]));

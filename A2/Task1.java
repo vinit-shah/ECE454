@@ -15,8 +15,6 @@ import org.apache.hadoop.util.GenericOptionsParser;
 public class Task1 {
 
     public static class TokenizerMapper extends Mapper<Object, Text, Text, Text> {
-        private final static IntWritable one = new IntWritable(1);
-        private final static IntWritable zero = new IntWritable(0);
         private Text word = new Text();
 
         public void map(Object key, Text value, Context context) throws IOException, InterruptedException {
@@ -67,16 +65,12 @@ public class Task1 {
         conf.set("mapreduce.output.textoutputformat.separator", ",");
 
         String[] otherArgs = new GenericOptionsParser(conf, args).getRemainingArgs();
-        // add code here
         if (otherArgs.length != 2) {
-            System.err.println("Usage: task3 <in> <out>");
+            System.err.println("Usage: task1 <in> <out>");
             System.exit(2);
         }
 
         Job job = Job.getInstance(conf, "Task1");
-        // one of the following two lines is often needed
-        // to avoid ClassNotFoundException
-//        job.setJarByClass(Task1.class);
         job.setJar("Task1.jar");
 
         job.setMapperClass(TokenizerMapper.class);

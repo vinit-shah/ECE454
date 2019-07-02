@@ -25,13 +25,11 @@ public class Task3 {
             // Count commas to know user count
             String val = value.toString();
             int userCount = val.length() - val.replace(",", "").length();   // # of commas = users
-//            System.out.println("User count: " + userCount);
 
             // Start from index 1 as the first one is movie name
             for (int i = 1; i <= userCount; i++) {
                 user.set(i);
                 if (i < tokens.length) {
-//                    System.out.println("User " + i + " \"" + tokens[i] + "\"");
                     context.write(user, tokens[i].length() > 0 ? one : zero);
                 } else {
                     context.write(user, zero);
@@ -59,16 +57,12 @@ public class Task3 {
         conf.set("mapreduce.output.textoutputformat.separator", ",");
 
         String[] otherArgs = new GenericOptionsParser(conf, args).getRemainingArgs();
-        // add code here
         if (otherArgs.length != 2) {
             System.err.println("Usage: task3 <in> <out>");
             System.exit(2);
         }
 
         Job job = Job.getInstance(conf, "Task3");
-        // one of the following two lines is often needed
-        // to avoid ClassNotFoundException
-//        job.setJarByClass(Task3.class);
         job.setJar("Task3.jar");
 
         job.setMapperClass(TokenizerMapper.class);

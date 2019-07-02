@@ -15,11 +15,8 @@ import java.io.IOException;
 public class Task2 {
 
     public static class TokenizerMapper extends Mapper<Object, Text, NullWritable, IntWritable> {
-        private Text word = new Text();
-
         public void map(Object key, Text value, Context context) throws IOException, InterruptedException {
             String[] tokens = value.toString().split(",");
-
             int count = 0;
             for (int i = 1; i < tokens.length; i++) {      // go through all available user ratings
                 if (tokens[i].length() > 0) {
@@ -47,16 +44,12 @@ public class Task2 {
         conf.set("mapreduce.output.textoutputformat.separator", ",");
 
         String[] otherArgs = new GenericOptionsParser(conf, args).getRemainingArgs();
-        // add code here
         if (otherArgs.length != 2) {
             System.err.println("Usage: task2 <in> <out>");
             System.exit(2);
         }
 
         Job job = Job.getInstance(conf, "Task2");
-        // one of the following two lines is often needed
-        // to avoid ClassNotFoundException
-//        job.setJarByClass(Task1.class);
         job.setJar("Task2.jar");
 
         job.setMapperClass(TokenizerMapper.class);
