@@ -1,1 +1,6 @@
 .DS_Store
+*.jar
+*.class
+.idea
+output_hadoop/*
+output_spark/*
