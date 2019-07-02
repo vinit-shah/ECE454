@@ -15,7 +15,7 @@ object Task4 {
     val movies = sc.broadcast(textFile.flatMap(line => line.split("\n")).collect())
     val pairs = movies.value.combinations(2).toList.map(x => if(x(0) < x(1)) (x(0), x(1)) else (x(1), x(0)))
     // modify this code
-    val output = pairs.map(computeSimilarities)
+    val output = sc.parallelize(pairs.map(computeSimilarities))
     output.saveAsTextFile(args(1))
   }
 }
