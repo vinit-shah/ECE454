@@ -17,7 +17,7 @@ object Task1 {
     val sc = new SparkContext(conf)
     val textFile = sc.textFile(args(0))
     val movies = textFile.flatMap(line => line.split("\n"))
-    val output = movies.map(topRatings)
+    val output = movies.map(topRatings).repartition(1)
     output.saveAsTextFile(args(1))
   }
 }
