@@ -7,7 +7,6 @@ object Task4 {
       val similarity = movies.filter(x => (x._1 == x._2) && (x._1 != "")).length
       return List(movies(0)._1, movies(0)._2, similarity).mkString(",")
   }
-
   def main(args: Array[String]) {
     val conf = new SparkConf().setAppName("Task 4")
     val sc = new SparkContext(conf)
@@ -19,3 +18,4 @@ object Task4 {
     val output = pairs.map(computeSimilarities)
     output.saveAsTextFile(args(1))
   }
+}
