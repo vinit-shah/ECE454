@@ -32,7 +32,7 @@ echo --- Jarring
 jar -cf Task3.jar Task3*.class
 
 echo --- Running
-INPUT=sample_input/smalldata.txt
+INPUT=sample_input/in3.txt
 OUTPUT=output_spark
 
 rm -fr $OUTPUT

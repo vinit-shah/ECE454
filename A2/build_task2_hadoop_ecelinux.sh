@@ -31,7 +31,7 @@ echo --- Jarring
 $JAVA_HOME/bin/jar -cf Task2.jar Task2*.class
 
 echo --- Running
-INPUT=sample_input/in1.txt
+INPUT=sample_input/in3.txt
 OUTPUT=output_hadoop
 
 rm -fr $OUTPUT
