@@ -21,7 +21,7 @@ import ca.uwaterloo.watca.ExecutionLogger;
 
 public class A3Client implements CuratorWatcher {
     static Logger log;
-    
+
     String zkConnectString;
     String zkNode;
     int numThreads;
@@ -55,7 +55,7 @@ public class A3Client implements CuratorWatcher {
     }
 
     A3Client(String zkConnectString, String zkNode, int numThreads, int numSeconds, int keySpaceSize) {
-	this.zkConnectString = zkConnectString; 
+	this.zkConnectString = zkConnectString;
 	this.zkNode = zkNode;
 	this.numThreads = numThreads;
 	this.numSeconds = numSeconds;
@@ -158,7 +158,7 @@ public class A3Client implements CuratorWatcher {
 	} catch (Exception e) {
 	    log.error("Unable to determine primary");
 	}
-	
+
     }
 
     class MyRunnable implements Runnable {
@@ -216,7 +216,7 @@ public class A3Client implements CuratorWatcher {
 		}
 	    } catch (Exception x) {
 		x.printStackTrace();
-	    } 	
+	    }
 	    globalNumOps.addAndGet(numOps);
 	}
     }
