@@ -30,10 +30,10 @@ public class KeyValueHandler implements KeyValueService.Iface {
 
     private String backupHost;
     private int backupPort;
-    private Boolean isBackup;
 
     private ReadWriteLock rwLock;
-    private Boolean syncedWithPrimary = false;
+
+    private Boolean backupExists;
 
     public KeyValueHandler(String myHost, int myPort, CuratorFramework curClient, String zkNode) {
         this.myHost = myHost;
@@ -46,18 +46,18 @@ public class KeyValueHandler implements KeyValueService.Iface {
     }
 
     public Map<String, String> getSnapshot() throws org.apache.thrift.TException {
-        System.out.println("KeyValueHandler:getSnapshot");
-        System.out.println("KeyValueHandler:getSnapshot lockin on table");
+        // System.out.println("KeyValueHandler:getSnapshot");
+        // System.out.println("KeyValueHandler:getSnapshot lockin on table");
         rwLock.writeLock().lock();
         Map<String, String> ret = myMap;
         rwLock.writeLock().unlock();
-        System.out.println("KeyValueHandler:getSnapshot unlocking on table");
+        // System.out.println("KeyValueHandler:getSnapshot unlocking on table");
         return ret;
     }
 
     public void sync() {
-        System.out.println("KeyValueHandler:sync");
-        System.out.println("KeyValueHandler:sync locking on table");
+        // System.out.println("KeyValueHandler:sync");
+        // System.out.println("KeyValueHandler:sync locking on table");
         rwLock.writeLock().lock();
         try {
             KeyValueService.Client primaryClient = getPrimaryKeyValueClient();
@@ -67,22 +67,22 @@ public class KeyValueHandler implements KeyValueService.Iface {
             System.out.println("could not sync with primary");
         }
         rwLock.writeLock().unlock();
-        System.out.println("KeyValueHandler:sync unlocked table");
+        // System.out.println("KeyValueHandler:sync unlocked table");
     }
 
     public String get(String key) throws org.apache.thrift.TException {
-        System.out.println("KeyValueHandler:get with key: " + key);
+        // System.out.println("KeyValueHandler:get with key: " + key);
         String ret;
         if (!lockMap.containsKey(key)) {
-            System.out.println("KeyValueHandler:get creating lock for key: " + key);
+            // System.out.println("KeyValueHandler:get creating lock for key: " + key);
             lockMap.put(key, new ReentrantReadWriteLock(true));
         }
-        System.out.println("KeyValueHandler:get locking on key: " + key);
+        // System.out.println("KeyValueHandler:get locking on key: " + key);
         ReadWriteLock keyLock = lockMap.get(key);
         keyLock.readLock().lock();
         ret = myMap.get(key);
         keyLock.readLock().unlock();
-        System.out.println("KeyValueHandler:get unlocked on key: " + key);
+        // System.out.println("KeyValueHandler:get unlocked on key: " + key);
         if (ret == null) {
             return "";
         } else {
@@ -91,52 +91,55 @@ public class KeyValueHandler implements KeyValueService.Iface {
     }
 
     public void put(String key, String value) throws org.apache.thrift.TException {
-        System.out.println("KeyValueHandler:put with key: " + key + " value: " + value);
+        // System.out.println("KeyValueHandler:put with key: " + key + " value: " + value);
         if (isPrimary) {
-            System.out.println("KeyValueHandler:put locking on table");
+            // System.out.println("KeyValueHandler:put locking on table");
             rwLock.readLock().lock();
             if (!lockMap.containsKey(key)) {
-                System.out.println("KeyValueHandler:put creating lock for key: " + key);
+                // System.out.println("KeyValueHandler:put creating lock for key: " + key);
                 lockMap.put(key, new ReentrantReadWriteLock(true));
             }
             ReadWriteLock keyLock = lockMap.get(key);
-            System.out.println("KeyValueHandler:put locking on key: " + key);
+            // System.out.println("KeyValueHandler:put locking on key: " + key);
             keyLock.writeLock().lock();
-            System.out.println("successfully locked on key " + key);
-            try {
-                TSocket sock = new TSocket(backupHost, backupPort);
-                TTransport transport = new TFramedTransport(sock);
-                transport.open();
-                TProtocol protocol = new TBinaryProtocol(transport);
-                KeyValueService.Client client = new KeyValueService.Client(protocol);
-                client.backupPut(key, value);
-                transport.close();
-            } catch (Exception e) {
-                System.out.println("Failed RPC to backup");
+            // System.out.println("successfully locked on key " + key);
+            if (backupExists) {
+                try {
+                    TSocket sock = new TSocket(backupHost, backupPort);
+                    TTransport transport = new TFramedTransport(sock);
+                    transport.open();
+                    TProtocol protocol = new TBinaryProtocol(transport);
+                    KeyValueService.Client client = new KeyValueService.Client(protocol);
+                    client.backupPut(key, value);
+                    transport.close();
+                } catch (Exception e) {
+                    System.out.println("Failed RPC to backup");
+                    backupExists = false;
+                }
             }
             keyLock.writeLock().unlock();
-            System.out.println("KeyValueHandler:put unlocked on key: " + key);
+            // System.out.println("KeyValueHandler:put unlocked on key: " + key);
             rwLock.readLock().unlock();
-            System.out.println("KeyValueHandler:put unlocked on table");
+            // System.out.println("KeyValueHandler:put unlocked on table");
         }
         myMap.put(key,value);
-        System.out.println("Finished put with key: " + key + " value: " + value);
+        // System.out.println("Finished put with key: " + key + " value: " + value);
     }
 
     public void backupPut(String key, String value) throws org.apache.thrift.TException {
-        System.out.println("Backup KeyValueHandler:backupPut with key: " + key + " value: " + value);
+        // System.out.println("Backup KeyValueHandler:backupPut with key: " + key + " value: " + value);
         myMap.put(key,value);
     }
 
     public void updateBackup(String hostName, int portNumber) {
-        System.out.println("KeyValueHandler:updateBackup - Backup: " + hostName + ":" + portNumber);
+        // System.out.println("KeyValueHandler:updateBackup - Backup: " + hostName + ":" + portNumber);
         backupHost = hostName;
         backupPort = portNumber;
-        isBackup = (myHost.equals(backupHost) && myPort == backupPort);
+        backupExists = true;
     }
 
     public void updatePrimary(String hostName, int portNumber) {
-        System.out.println("KeyValueHandler:updatePrimary - Primary: " + hostName + ":" + portNumber);
+        // System.out.println("KeyValueHandler:updatePrimary - Primary: " + hostName + ":" + portNumber);
         primaryHost = hostName;
         primaryPort = portNumber;
         isPrimary = (myHost.equals(primaryHost) && myPort == primaryPort);
