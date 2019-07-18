@@ -200,20 +200,20 @@ public class A3Client implements CuratorWatcher {
                             }
                         }
                     } else {
-                        while (!done) {
-                            try {
-                                String key = "key-" + (Math.abs(rand.nextLong()) % keySpaceSize);
-                                exlog.logReadInvocation(tid, key);
-                                String resp = client.get(key);
-                                exlog.logReadResponse(tid, key, resp);
-                                numOps++;
-                                break;
-                            } catch (Exception e) {
-                                log.error("Exception during get");
-                                Thread.sleep(100);
-                                client = getThriftClient();
-                            }
-                        }
+                        // while (!done) {
+                        //     try {
+                        //         String key = "key-" + (Math.abs(rand.nextLong()) % keySpaceSize);
+                        //         exlog.logReadInvocation(tid, key);
+                        //         String resp = client.get(key);
+                        //         exlog.logReadResponse(tid, key, resp);
+                        //         numOps++;
+                        //         break;
+                        //     } catch (Exception e) {
+                        //         log.error("Exception during get");
+                        //         Thread.sleep(100);
+                        //         client = getThriftClient();
+                        //     }
+                        // }
                     }
                     long diffTime = System.nanoTime() - startTime;
                     totalTime += diffTime / 1000;

@@ -42,7 +42,7 @@ public class KeyValueHandler implements KeyValueService.Iface {
         this.zkNode = zkNode;
         myMap = new ConcurrentHashMap<String, String>();
         lockMap = new ConcurrentHashMap<String, ReadWriteLock>();
-        rwLock = new ReentrantReadWriteLock(true); //
+        rwLock = new ReentrantReadWriteLock(true);
     }
 
     public Map<String, String> getSnapshot() throws org.apache.thrift.TException {
@@ -62,6 +62,7 @@ public class KeyValueHandler implements KeyValueService.Iface {
         try {
             KeyValueService.Client primaryClient = getPrimaryKeyValueClient();
             myMap = new ConcurrentHashMap<String,String>(primaryClient.getSnapshot());
+            testPrint();
         } catch (Exception e) {
             System.out.println("could not sync with primary");
         }
@@ -101,9 +102,17 @@ public class KeyValueHandler implements KeyValueService.Iface {
             ReadWriteLock keyLock = lockMap.get(key);
             System.out.println("KeyValueHandler:put locking on key: " + key);
             keyLock.writeLock().lock();
-            KeyValueService.Client client = getBackupKeyValueClient();
-            if (client != null) {
-                client.put(key, value);
+            System.out.println("successfully locked on key " + key);
+            try {
+                TSocket sock = new TSocket(backupHost, backupPort);
+                TTransport transport = new TFramedTransport(sock);
+                transport.open();
+                TProtocol protocol = new TBinaryProtocol(transport);
+                KeyValueService.Client client = new KeyValueService.Client(protocol);
+                client.backupPut(key, value);
+                transport.close();
+            } catch (Exception e) {
+                System.out.println("Failed RPC to backup");
             }
             keyLock.writeLock().unlock();
             System.out.println("KeyValueHandler:put unlocked on key: " + key);
@@ -112,6 +121,11 @@ public class KeyValueHandler implements KeyValueService.Iface {
         }
         myMap.put(key,value);
         System.out.println("Finished put with key: " + key + " value: " + value);
+    }
+
+    public void backupPut(String key, String value) throws org.apache.thrift.TException {
+        System.out.println("Backup KeyValueHandler:backupPut with key: " + key + " value: " + value);
+        myMap.put(key,value);
     }
 
     public void updateBackup(String hostName, int portNumber) {
@@ -146,16 +160,9 @@ public class KeyValueHandler implements KeyValueService.Iface {
         }
     }
 
-    private KeyValueService.Client getBackupKeyValueClient() {
-        try {
-            TSocket sock = new TSocket(backupHost, backupPort);
-            TTransport transport = new TFramedTransport(sock);
-            transport.open();
-            TProtocol protocol = new TBinaryProtocol(transport);
-            return new KeyValueService.Client(protocol);
-        } catch (Exception e) {
-            System.out.println("Unable to connect to backup");
+    private void testPrint() {
+        for (String key : myMap.keySet()) {
+            System.out.println(key + " : " + myMap.get(key));
         }
-        return null;
     }
 }

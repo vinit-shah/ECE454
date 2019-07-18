@@ -17,4 +17,4 @@ echo Number of other linearizability violations: `cat scores.txt | grep 'Score =
 
 echo
 echo NOTE: Shut down both the primary and the secondary storage nodes after running this script, and then restart them.  Failure to do so will result in false linearizability violations the next time you run the client.
-echo 
+echo
