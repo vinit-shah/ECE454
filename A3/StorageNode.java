@@ -25,6 +25,7 @@ public class StorageNode implements CuratorWatcher {
     String zkNode;
     CuratorFramework curClient;
     volatile InetSocketAddress primaryAddress;
+    volatile InetSocketAddress backupAddress;
     KeyValueHandler handler;
 
     public StorageNode(String hostName, Integer port, String zkConnectString, String zkNode) {
@@ -105,13 +106,40 @@ public class StorageNode implements CuratorWatcher {
         }
     }
 
+    public InetSocketAddress getBackup() throws Exception {
+        curClient.sync();
+        List<String> children =
+                curClient.getChildren().usingWatcher(this).forPath(zkNode);
+        if (children.size() < 2) {
+            log.error("No backup found");
+            return null;
+        }
+        Collections.sort(children);
+        // TODO: Is it always safe to assume that backup is the 1th index child??
+        byte[] data = curClient.getData().forPath(zkNode + "/" + children.get(1));
+        String strData = new String(data);
+        String[] backup = strData.split(":");
+        log.info("Found backup " + strData);
+        return new InetSocketAddress(backup[0], Integer.parseInt(backup[1]));
+    }
+
     synchronized public void process(WatchedEvent event) {
         log.info("ZooKeeper event " + event);
         try {
             primaryAddress = getPrimary();
             handler.updatePrimary(primaryAddress.getHostName(), primaryAddress.getPort());
         } catch (Exception e) {
-            log.error("Unable to determine primary");
+            log.error("Unable to determine primary:");
+            log.error("\t" + e.getLocalizedMessage());
+        }
+
+        try {
+            backupAddress = getBackup();
+            if (backupAddress != null)
+                handler.updateBackup(backupAddress.getHostName(), backupAddress.getPort());
+        } catch (Exception e) {
+            log.error("Unable to determine backup:");
+            log.error("\t" + e.getLocalizedMessage());
         }
     }
 }

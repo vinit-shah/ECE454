@@ -22,13 +22,16 @@ public class KeyValueHandler implements KeyValueService.Iface {
     private String zkNode;
     private String myHost;
     private int myPort;
+
     private String primaryHost;
     private int primaryPort;
+    private Boolean isPrimary;
+
     private String backupHost;
     private int backupPort;
-    private Boolean isPrimary;
-    private ReadWriteLock rwLock;
+    private Boolean isBackup;
 
+    private ReadWriteLock rwLock;
     private Boolean syncedWithPrimary = false;
 
     public KeyValueHandler(String myHost, int myPort, CuratorFramework curClient, String zkNode) {
@@ -37,23 +40,25 @@ public class KeyValueHandler implements KeyValueService.Iface {
         this.curClient = curClient;
         this.zkNode = zkNode;
         myMap = new ConcurrentHashMap<String, String>();
-        rwLock = new ReentrantReadWriteLock();
+        rwLock = new ReentrantReadWriteLock(true);
     }
 
-    public Map<String,String> getAll() throws org.apache.thrift.TException {
+    public Map<String, String> getAll() throws org.apache.thrift.TException {
         // TODO: Do we need to synchronize this return?
         // TODO: Is it okay to return entire map? Or is there too much overhead?
         return myMap;
     }
 
     public String get(String key) throws org.apache.thrift.TException {
+        String ret = null;
+
         rwLock.readLock().lock();
-        String ret = myMap.get(key);
+        ret = myMap.get(key);
+        rwLock.readLock().unlock();
+
         if (ret == null) {
-            rwLock.readLock().unlock();
             return "";
         } else {
-            rwLock.readLock().unlock();
             return ret;
         }
     }
@@ -67,11 +72,19 @@ public class KeyValueHandler implements KeyValueService.Iface {
         }
     }
 
+    public void updateBackup(String hostName, int portNumber) {
+        // System.out.println("Backup: " + hostName + ":" + portNumber);
+        backupHost = hostName;
+        backupPort = portNumber;
+        isBackup = (myHost.equals(backupHost) && myPort == backupPort);
+    }
+
     public void updatePrimary(String hostName, int portNumber) {
         // System.out.println("Primary: " + hostName + ":" + portNumber);
         primaryHost = hostName;
         primaryPort = portNumber;
         isPrimary = (myHost.equals(primaryHost) && myPort == primaryPort);
+
         if (!isPrimary && !syncedWithPrimary) {
             System.out.println("Trying to sync with primary:");
             System.out.println("\t" + myHost + " : " + myPort + " <-- " + primaryHost + " : " + primaryPort);
@@ -86,7 +99,7 @@ public class KeyValueHandler implements KeyValueService.Iface {
 
     private void syncWithPrimary() throws Exception {
         System.out.println("syncing with primary " + primaryHost + " : " + primaryPort);
-        myMap = getPrimaryKeyValueClient().getAll();    // sync with primary
+        myMap = new ConcurrentHashMap<String, String>(getPrimaryKeyValueClient().getAll());    // sync with primary
         syncedWithPrimary = true;
         System.out.println("syncing done");
     }
@@ -101,6 +114,24 @@ public class KeyValueHandler implements KeyValueService.Iface {
                 return new KeyValueService.Client(protocol);
             } catch (Exception e) {
                 System.out.println("Unable to connect to primary");
+            }
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+            }
+        }
+    }
+
+    KeyValueService.Client getBackupKeyValueClient() {
+        while (true) {
+            try {
+                TSocket sock = new TSocket(backupHost, backupPort);
+                TTransport transport = new TFramedTransport(sock);
+                transport.open();
+                TProtocol protocol = new TBinaryProtocol(transport);
+                return new KeyValueService.Client(protocol);
+            } catch (Exception e) {
+                System.out.println("Unable to connect to backup");
             }
             try {
                 Thread.sleep(100);
