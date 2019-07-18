@@ -37,49 +37,49 @@ public class StorageNode implements CuratorWatcher {
 
     public void start() throws Exception {
         curClient =
-    	    CuratorFrameworkFactory.builder()
-    	    .connectString(zkConnectString)
-    	    .retryPolicy(new RetryNTimes(10, 1000))
-    	    .connectionTimeoutMs(1000)
-    	    .sessionTimeoutMs(10000)
-    	    .build();
+                CuratorFrameworkFactory.builder()
+                        .connectString(zkConnectString)
+                        .retryPolicy(new RetryNTimes(10, 1000))
+                        .connectionTimeoutMs(1000)
+                        .sessionTimeoutMs(10000)
+                        .build();
 
-    	curClient.start();
-    	Runtime.getRuntime().addShutdownHook(new Thread() {
-    		public void run() {
-    		    curClient.close();
-    		}
-    	 });
+        curClient.start();
+        Runtime.getRuntime().addShutdownHook(new Thread() {
+            public void run() {
+                curClient.close();
+            }
+        });
+
         handler = new KeyValueHandler(hostName, port, curClient, zkNode);
-
         KeyValueService.Processor<KeyValueService.Iface> processor = new KeyValueService.Processor<>(handler);
-     	TServerSocket socket = new TServerSocket(port);
-     	TThreadPoolServer.Args sargs = new TThreadPoolServer.Args(socket);
-     	sargs.protocolFactory(new TBinaryProtocol.Factory());
-     	sargs.transportFactory(new TFramedTransport.Factory());
-     	sargs.processorFactory(new TProcessorFactory(processor));
-     	sargs.maxWorkerThreads(64);
-     	TServer server = new TThreadPoolServer(sargs);
-     	log.info("Launching server");
-     	new Thread(new Runnable() {
-     		public void run() {
-     		    server.serve();
-     		}
-     	    }).start();
+        TServerSocket socket = new TServerSocket(port);
+        TThreadPoolServer.Args sargs = new TThreadPoolServer.Args(socket);
+        sargs.protocolFactory(new TBinaryProtocol.Factory());
+        sargs.transportFactory(new TFramedTransport.Factory());
+        sargs.processorFactory(new TProcessorFactory(processor));
+        sargs.maxWorkerThreads(64);
+        TServer server = new TThreadPoolServer(sargs);
+        log.info("Launching server");
+        new Thread(new Runnable() {
+            public void run() {
+                server.serve();
+            }
+        }).start();
 
-         curClient.create().withMode(CreateMode.EPHEMERAL_SEQUENTIAL).forPath(zkNode + "/" , (hostName + ":" + port).getBytes());
-         primaryAddress = getPrimary();
-         handler.updatePrimary(primaryAddress.getHostName(), primaryAddress.getPort());
+        curClient.create().withMode(CreateMode.EPHEMERAL_SEQUENTIAL).forPath(zkNode + "/", (hostName + ":" + port).getBytes());
+        primaryAddress = getPrimary();
+        handler.updatePrimary(primaryAddress.getHostName(), primaryAddress.getPort());
     }
 
-    public static void main(String [] args) throws Exception {
-    	BasicConfigurator.configure();
-    	log = Logger.getLogger(StorageNode.class.getName());
+    public static void main(String[] args) throws Exception {
+        BasicConfigurator.configure();
+        log = Logger.getLogger(StorageNode.class.getName());
 
-    	if (args.length != 4) {
-    	    System.err.println("Usage: java StorageNode host port zkconnectstring zknode");
-    	    System.exit(-1);
-    	}
+        if (args.length != 4) {
+            System.err.println("Usage: java StorageNode host port zkconnectstring zknode");
+            System.exit(-1);
+        }
         log.info("host: " + args[0]);
         log.info("port: " + args[1]);
         StorageNode node = new StorageNode(args[0], Integer.parseInt(args[1]), args[2], args[3]);
@@ -90,7 +90,7 @@ public class StorageNode implements CuratorWatcher {
         while (true) {
             curClient.sync();
             List<String> children =
-            curClient.getChildren().usingWatcher(this).forPath(zkNode);
+                    curClient.getChildren().usingWatcher(this).forPath(zkNode);
             if (children.size() == 0) {
                 log.error("No primary found");
                 Thread.sleep(100);
@@ -106,12 +106,12 @@ public class StorageNode implements CuratorWatcher {
     }
 
     synchronized public void process(WatchedEvent event) {
-    	log.info("ZooKeeper event " + event);
-    	try {
-    	    primaryAddress = getPrimary();
+        log.info("ZooKeeper event " + event);
+        try {
+            primaryAddress = getPrimary();
             handler.updatePrimary(primaryAddress.getHostName(), primaryAddress.getPort());
-    	} catch (Exception e) {
-    	    log.error("Unable to determine primary");
+        } catch (Exception e) {
+            log.error("Unable to determine primary");
         }
-	}
+    }
 }
