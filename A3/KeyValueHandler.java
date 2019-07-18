@@ -1,5 +1,6 @@
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.locks.*;
 import java.net.*;
 
 import org.apache.thrift.*;
@@ -15,61 +16,65 @@ import org.apache.curator.framework.*;
 import org.apache.curator.framework.api.*;
 
 
-public class KeyValueHandler implements KeyValueService.Iface, CuratorWatcher {
+public class KeyValueHandler implements KeyValueService.Iface {
     private Map<String, String> myMap;
     private CuratorFramework curClient;
     private String zkNode;
-    private String host;
-    private int port;
-    volatile InetSocketAddress primaryAddress;
-
-    public KeyValueHandler(String host, int port, CuratorFramework curClient, String zkNode) {
-    	this.host = host;
-    	this.port = port;
+    private String myHost;
+    private int myPort;
+    private String primaryHost;
+    private int primaryPort;
+    private String backupHost;
+    private int backupPort;
+    private Boolean isPrimary;
+    private ReadWriteLock rwLock;
+    public KeyValueHandler(String myHost, int myPort, CuratorFramework curClient, String zkNode) {
+    	this.myHost = myHost;
+    	this.myPort = myPort;
     	this.curClient = curClient;
     	this.zkNode = zkNode;
     	myMap = new ConcurrentHashMap<String, String>();
-        primaryAddress = null;
+        rwLock = new ReentrantReadWriteLock();
     }
 
     public String get(String key) throws org.apache.thrift.TException
     {
+        rwLock.readLock().lock();
     	String ret = myMap.get(key);
-    	if (ret == null)
+    	if (ret == null) {
+            rwLock.readLock().unlock();
     	    return "";
-    	else
+        }
+    	else {
+            rwLock.readLock().unlock();
     	    return ret;
+        }
     }
 
     public void put(String key, String value) throws org.apache.thrift.TException
     {
-    	myMap.put(key, value);
+        if (isPrimary) {
+            rwLock.writeLock().lock();
+
+        } else {
+            myMap.put(key,value);
+        }
     }
 
-    private InetSocketAddress getPrimary() throws Exception {
-    	while (true) {
-    	    curClient.sync();
-    	    List<String> children =
-    		curClient.getChildren().usingWatcher(this).forPath(zkNode);
-    	    if (children.size() == 0) {
-    		// log.error("No primary found");
-    		Thread.sleep(100);
-    		continue;
-    	    }
-    	    Collections.sort(children);
-    	    byte[] data = curClient.getData().forPath(zkNode + "/" + children.get(0));
-    	    String strData = new String(data);
-    	    String[] primary = strData.split(":");
-    	    // log.info("Found primary " + strData);
-    	    return new InetSocketAddress(primary[0], Integer.parseInt(primary[1]));
-    	}
+    public void updatePrimary(String hostName, int portNumber){
+        // System.out.println("Primary: " + hostName + ":" + portNumber);
+        primaryHost = hostName;
+        primaryPort = portNumber;
+        isPrimary = (myHost.equals(primaryHost) &&  myPort == primaryPort);
     }
 
-    synchronized public void process(WatchedEvent event) {
-    	try {
-    	    primaryAddress = getPrimary();
-    	} catch (Exception e) {
-    	}
+    public void updateBackup(String hostName, int portNumber) {
 
+    }
+
+    private getThriftClientToBackup() {
+        while(true) {
+
+        }
     }
 }

@@ -32,4 +32,3 @@ echo --- Compiling Java
 $JAVA_CC -version
 $JAVA_CC gen-java/*.java
 $JAVA_CC *.java
-
