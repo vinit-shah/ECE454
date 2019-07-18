@@ -1,6 +1,5 @@
 service KeyValueService {
   string get(1: string key);
   void put(1: string key, 2: string value);
-  void updatePrimary(1: string host, 2: i32 port);
-  map<string,string> getAll();
+  map<string,string> getSnapshot();
 }

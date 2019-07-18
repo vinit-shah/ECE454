@@ -34,6 +34,7 @@ public class StorageNode implements CuratorWatcher {
         this.zkConnectString = zkConnectString;
         this.zkNode = zkNode;
         primaryAddress = null;
+        backupAddress = null;
     }
 
     public void start() throws Exception {
@@ -70,22 +71,15 @@ public class StorageNode implements CuratorWatcher {
 
         curClient.create().withMode(CreateMode.EPHEMERAL_SEQUENTIAL).forPath(zkNode + "/", (hostName + ":" + port).getBytes());
         primaryAddress = getPrimary();
+        backupAddress = getBackup();
         handler.updatePrimary(primaryAddress.getHostName(), primaryAddress.getPort());
-    }
-
-    public static void main(String[] args) throws Exception {
-        BasicConfigurator.configure();
-        log = Logger.getLogger(StorageNode.class.getName());
-
-        if (args.length != 4) {
-            System.err.println("Usage: java StorageNode host port zkconnectstring zknode");
-            System.exit(-1);
+        if (null != backupAddress) {
+            handler.updateBackup(backupAddress.getHostName(), backupAddress.getPort());
+            if (backupAddress.getHostName().equals(this.hostName) && backupAddress.getPort() == this.port) {
+                handler.sync();
+            }
         }
-        log.info("host: " + args[0]);
-        log.info("port: " + args[1]);
-        StorageNode node = new StorageNode(args[0], Integer.parseInt(args[1]), args[2], args[3]);
-        node.start();
-    }
+     }
 
     public InetSocketAddress getPrimary() throws Exception {
         while (true) {
@@ -111,11 +105,11 @@ public class StorageNode implements CuratorWatcher {
         List<String> children =
                 curClient.getChildren().usingWatcher(this).forPath(zkNode);
         if (children.size() < 2) {
-            log.error("No backup found");
+            log.info("No backup found");
             return null;
         }
         Collections.sort(children);
-        // TODO: Is it always safe to assume that backup is the 1th index child??
+        // after sorting lexigraphically, the backup will always be second element in the list (assuming 2 nodes exist)
         byte[] data = curClient.getData().forPath(zkNode + "/" + children.get(1));
         String strData = new String(data);
         String[] backup = strData.split(":");
@@ -141,5 +135,19 @@ public class StorageNode implements CuratorWatcher {
             log.error("Unable to determine backup:");
             log.error("\t" + e.getLocalizedMessage());
         }
+    }
+
+    public static void main(String[] args) throws Exception {
+        BasicConfigurator.configure();
+        log = Logger.getLogger(StorageNode.class.getName());
+
+        if (args.length != 4) {
+            System.err.println("Usage: java StorageNode host port zkconnectstring zknode");
+            System.exit(-1);
+        }
+        log.info("host: " + args[0]);
+        log.info("port: " + args[1]);
+        StorageNode node = new StorageNode(args[0], Integer.parseInt(args[1]), args[2], args[3]);
+        node.start();
     }
 }
