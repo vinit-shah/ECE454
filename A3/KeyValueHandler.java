@@ -62,7 +62,7 @@ public class KeyValueHandler implements KeyValueService.Iface {
         try {
             KeyValueService.Client primaryClient = getPrimaryKeyValueClient();
             myMap = new ConcurrentHashMap<String,String>(primaryClient.getSnapshot());
-            testPrint();
+            // testPrint();
         } catch (Exception e) {
             System.out.println("could not sync with primary");
         }
@@ -70,7 +70,7 @@ public class KeyValueHandler implements KeyValueService.Iface {
         // System.out.println("KeyValueHandler:sync unlocked table");
     }
 
-    public String get(String key) throws org.apache.thrift.TException {
+    public synchronized String get(String key) throws org.apache.thrift.TException {
         // System.out.println("KeyValueHandler:get with key: " + key);
         String ret;
         if (!lockMap.containsKey(key)) {
@@ -90,7 +90,7 @@ public class KeyValueHandler implements KeyValueService.Iface {
         }
     }
 
-    public void put(String key, String value) throws org.apache.thrift.TException {
+    public synchronized void put(String key, String value) throws org.apache.thrift.TException {
         // System.out.println("KeyValueHandler:put with key: " + key + " value: " + value);
         if (isPrimary) {
             // System.out.println("KeyValueHandler:put locking on table");
@@ -102,6 +102,7 @@ public class KeyValueHandler implements KeyValueService.Iface {
             ReadWriteLock keyLock = lockMap.get(key);
             // System.out.println("KeyValueHandler:put locking on key: " + key);
             keyLock.writeLock().lock();
+            myMap.put(key,value);
             // System.out.println("successfully locked on key " + key);
             if (backupExists) {
                 try {
@@ -122,7 +123,6 @@ public class KeyValueHandler implements KeyValueService.Iface {
             rwLock.readLock().unlock();
             // System.out.println("KeyValueHandler:put unlocked on table");
         }
-        myMap.put(key,value);
         // System.out.println("Finished put with key: " + key + " value: " + value);
     }
 
@@ -131,14 +131,14 @@ public class KeyValueHandler implements KeyValueService.Iface {
         myMap.put(key,value);
     }
 
-    public void updateBackup(String hostName, int portNumber) {
+    public synchronized void updateBackup(String hostName, int portNumber) {
         // System.out.println("KeyValueHandler:updateBackup - Backup: " + hostName + ":" + portNumber);
         backupHost = hostName;
         backupPort = portNumber;
         backupExists = true;
     }
 
-    public void updatePrimary(String hostName, int portNumber) {
+    public synchronized void updatePrimary(String hostName, int portNumber) {
         // System.out.println("KeyValueHandler:updatePrimary - Primary: " + hostName + ":" + portNumber);
         primaryHost = hostName;
         primaryPort = portNumber;
@@ -160,12 +160,6 @@ public class KeyValueHandler implements KeyValueService.Iface {
                 Thread.sleep(100);
             } catch (InterruptedException e) {
             }
-        }
-    }
-
-    private void testPrint() {
-        for (String key : myMap.keySet()) {
-            System.out.println(key + " : " + myMap.get(key));
         }
     }
 }
