@@ -73,10 +73,11 @@ public class KeyValueHandler implements KeyValueService.Iface {
     public synchronized String get(String key) throws org.apache.thrift.TException {
         // System.out.println("KeyValueHandler:get with key: " + key);
         String ret;
-        if (!lockMap.containsKey(key)) {
-            // System.out.println("KeyValueHandler:get creating lock for key: " + key);
-            lockMap.put(key, new ReentrantReadWriteLock(true));
-        }
+//        if (!lockMap.containsKey(key)) {
+//            // System.out.println("KeyValueHandler:get creating lock for key: " + key);
+//            lockMap.put(key, new ReentrantReadWriteLock(true));
+//        }
+        lockMap.computeIfAbsent(key, k -> new ReentrantReadWriteLock(true));
         // System.out.println("KeyValueHandler:get locking on key: " + key);
         ReadWriteLock keyLock = lockMap.get(key);
         keyLock.readLock().lock();
@@ -95,10 +96,11 @@ public class KeyValueHandler implements KeyValueService.Iface {
         if (isPrimary) {
             // System.out.println("KeyValueHandler:put locking on table");
             rwLock.readLock().lock();
-            if (!lockMap.containsKey(key)) {
-                // System.out.println("KeyValueHandler:put creating lock for key: " + key);
-                lockMap.put(key, new ReentrantReadWriteLock(true));
-            }
+//            if (!lockMap.containsKey(key)) {
+//                // System.out.println("KeyValueHandler:put creating lock for key: " + key);
+//                lockMap.put(key, new ReentrantReadWriteLock(true));
+//            }
+            lockMap.computeIfAbsent(key, k -> new ReentrantReadWriteLock(true));
             ReadWriteLock keyLock = lockMap.get(key);
             // System.out.println("KeyValueHandler:put locking on key: " + key);
             keyLock.writeLock().lock();
