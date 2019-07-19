@@ -28,9 +28,8 @@ public class KeyValueHandler implements KeyValueService.Iface, CuratorWatcher {
     private volatile InetSocketAddress primaryAddress;
     private volatile InetSocketAddress backupAddress;
 
-    private ReadWriteLock tableLock;
     private ReadWriteLock[] bucketLocks;
-
+    private KeyValueService.Client[] clientPool;
 
     public KeyValueHandler(String host, int port, CuratorFramework curClient, String zkNode) {
     	this.host = host;
@@ -39,18 +38,17 @@ public class KeyValueHandler implements KeyValueService.Iface, CuratorWatcher {
     	this.zkNode = zkNode;
     	myMap = new ConcurrentHashMap<String, String>();
         backupClients = new ConcurrentHashMap<InetSocketAddress, KeyValueService.Client>();
-        tableLock = new ReentrantReadWriteLock(true);
-        bucketLocks = new ReentrantReadWriteLock[100];
+        bucketLocks = new ReentrantReadWriteLock[62];
         for (int i = 0; i < bucketLocks.length; i++) {
             bucketLocks[i] = new ReentrantReadWriteLock(true);
         }
+        clientPool = new KeyValueService.Client[62];
         primaryAddress = null;
         backupAddress = null;
     }
 
     public String get(String key) throws org.apache.thrift.TException
     {
-        System.out.println("KeyValueHandler:get with key: " + key);
         if (!isPrimary()) {
             System.out.println("Client trying to get from backup, throwing an exception at it");
             TSocket sock = new TSocket(primaryAddress.getHostName(), primaryAddress.getPort());
@@ -70,7 +68,6 @@ public class KeyValueHandler implements KeyValueService.Iface, CuratorWatcher {
 
     public void put(String key, String value) throws org.apache.thrift.TException
     {
-        System.out.println("KeyValueHandler:put with key: " + key + " value: " + value);
         if (!isPrimary()) {
             System.out.println("Client trying to put to backup incorrectly, throwing an exception at it");
             TSocket sock = new TSocket(primaryAddress.getHostName(), primaryAddress.getPort());
@@ -79,18 +76,19 @@ public class KeyValueHandler implements KeyValueService.Iface, CuratorWatcher {
             transport.open();
         }
         int bucket = hash(key);
-        tableLock.readLock().lock();
         bucketLocks[bucket].writeLock().lock();
         myMap.put(key,value);
         if (backupAddress != null) {
             try{
-                TSocket sock = new TSocket(backupAddress.getHostName(), backupAddress.getPort());
-                TTransport transport = new TFramedTransport(sock);
-                transport.open();
-                TProtocol protocol = new TBinaryProtocol(transport);
-                KeyValueService.Client client = new KeyValueService.Client(protocol);
-                client.backupPut(key, value);
-                transport.close();
+                if (clientPool[bucket] == null) {
+                    TSocket sock = new TSocket(backupAddress.getHostName(), backupAddress.getPort());
+                    TTransport transport = new TFramedTransport(sock);
+                    transport.open();
+                    TProtocol protocol = new TBinaryProtocol(transport);
+                    KeyValueService.Client client = new KeyValueService.Client(protocol);
+                    clientPool[bucket] = client;
+                }
+                clientPool[bucket].backupPut(key, value);
             } catch (Exception e) {
                 System.out.println("Failed to write to backup");
                 System.out.println(e.getLocalizedMessage());
@@ -99,41 +97,37 @@ public class KeyValueHandler implements KeyValueService.Iface, CuratorWatcher {
             System.out.println("backup is null");
         }
         bucketLocks[bucket].writeLock().unlock();
-        tableLock.readLock().unlock();
     }
 
-    public Map<String,String> copy() throws org.apache.thrift.TException {
-        tableLock.writeLock().lock();
-        Map<String,String> ret = myMap;
-        tableLock.writeLock().unlock();
-        return ret;
-    }
 
     public void backupPut(String key, String value) throws org.apache.thrift.TException {
-        System.out.println("backupPut with key: " + key + " value: " + value);
+        // System.out.println("backupPut with key: " + key + " value: " + value);
         myMap.put(key,value);
     }
 
-    public void sync() {
-        tableLock.writeLock().lock();
-        while(true) {
-            System.out.println("in here");
-            try {
-                TSocket sock = new TSocket(primaryAddress.getHostName(), primaryAddress.getPort());
-                TTransport transport = new TFramedTransport(sock);
-                transport.open();
-                TProtocol protocol = new TBinaryProtocol(transport);
-                KeyValueService.Client client = new KeyValueService.Client(protocol);
-                Map<String,String> temp = client.copy();
-                // transport.close();
-                myMap = new ConcurrentHashMap<String,String>(temp);
-                break;
-            } catch(Exception e) {
-                System.out.println("Failed to sync with primary");
-                System.out.println(e.getLocalizedMessage());
-            }
+    public void sync(Map<String, String> primaryMap) throws org.apache.thrift.TException {
+        myMap = new ConcurrentHashMap(primaryMap);
+    }
+
+    public void copyTableInReplica(String host, int port) {
+        for(int i = 0; i < bucketLocks.length; i++) {
+            bucketLocks[i].readLock().lock();
         }
-        tableLock.writeLock().unlock();
+        try {
+            TSocket sock = new TSocket(host, port);
+            TTransport transport = new TFramedTransport(sock);
+            transport.open();
+            TProtocol protocol = new TBinaryProtocol(transport);
+            KeyValueService.Client client = new KeyValueService.Client(protocol);
+            client.sync(myMap);
+            transport.close();
+        } catch(Exception e) {
+            System.out.println("Failed to copy to replica");
+            System.out.println(e.getLocalizedMessage());
+        }
+        for(int i = 0; i < bucketLocks.length; i++) {
+            bucketLocks[i].readLock().unlock();
+        }
     }
 
     synchronized public void determineNodes() throws Exception {
@@ -141,35 +135,27 @@ public class KeyValueHandler implements KeyValueService.Iface, CuratorWatcher {
         while(true) {
             curClient.sync();
             children = curClient.getChildren().usingWatcher(this).forPath(zkNode);
-            if (children.size() == 0) {
-                System.out.println("No primary found");
-                Thread.sleep(100);
-                continue;
-            }
-            if (children.size() >= 3) {
-                System.out.println("Zookeeper hasn't finished deleting the old crashed node");
-                Thread.sleep(100);
-                continue;
-            }
             Collections.sort(children);
-            byte[] data = curClient.getData().forPath(zkNode + "/" + children.get(0));
-            String strData = new String(data);
-            String[] primary = strData.split(":");
-            primaryAddress = new InetSocketAddress(primary[0], Integer.parseInt(primary[1]));
-            System.out.println("Found primary " + strData);
-            System.out.println("Children size: " + children.size());
-            backupAddress = null;
-            if (children.size() > 1) {
-                // copy immediately, process stuff later the primary may die quickly and string operations are expensive
-                if (!isPrimary()) {
-                    sync();
-                }
+            if (children.size() == 1) {
+                primaryAddress = new InetSocketAddress(host, port);
+                backupAddress = null;
+                clientPool = null;
+            } else if (children.size() > 1) {
                 byte[] backupData = curClient.getData().forPath(zkNode + "/" + children.get(1));
                 String backupStrData = new String(backupData);
                 String[] backup = backupStrData.split(":");
+                if (isPrimary()) {
+                    System.out.println("Confirm only the primary runs this");
+                    copyTableInReplica(backup[0], Integer.parseInt(backup[1]));
+                    clientPool = new KeyValueService.Client[62];
+                }
                 backupAddress = new InetSocketAddress(backup[0], Integer.parseInt(backup[1]));
-                // registerBackupClient(backupAddress);
-                System.out.println("Found backup " + backupStrData);
+                System.out.println("Confirm this runs after syncing");
+                byte[] data = curClient.getData().forPath(zkNode + "/" + children.get(0));
+                String strData = new String(data);
+                String[] primary = strData.split(":");
+                primaryAddress = new InetSocketAddress(primary[0], Integer.parseInt(primary[1]));
+                System.out.println("Found primary " + strData);
             }
             break;
         }
@@ -188,20 +174,8 @@ public class KeyValueHandler implements KeyValueService.Iface, CuratorWatcher {
         return Math.abs(key.hashCode()%bucketLocks.length);
     }
 
-    synchronized private void registerBackupClient(InetSocketAddress backupAddress) {
-        try {
-            TSocket sock = new TSocket(backupAddress.getHostName(), backupAddress.getPort());
-            TTransport transport = new TFramedTransport(sock);
-            transport.open();
-            TProtocol protocol = new TBinaryProtocol(transport);
-            KeyValueService.Client client = new KeyValueService.Client(protocol);
-            backupClients.put(backupAddress, client);
-        } catch (Exception e) {
-            System.out.println("Failed to registerBackupClient");
-        }
-    }
-
     private synchronized Boolean isPrimary() {
+        if (null == primaryAddress) return false;
         return (host.equals(primaryAddress.getHostName()) && port == primaryAddress.getPort());
     }
 }
