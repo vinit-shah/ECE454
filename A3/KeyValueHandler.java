@@ -1,6 +1,7 @@
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.*;
+import java.lang.*;
 import java.net.*;
 
 import org.apache.thrift.*;
@@ -16,152 +17,191 @@ import org.apache.curator.framework.*;
 import org.apache.curator.framework.api.*;
 
 
-public class KeyValueHandler implements KeyValueService.Iface {
+public class KeyValueHandler implements KeyValueService.Iface, CuratorWatcher {
     private Map<String, String> myMap;
-    private Map<String, ReadWriteLock> lockMap;
+    private Map<InetSocketAddress, KeyValueService.Client> backupClients;
     private CuratorFramework curClient;
     private String zkNode;
-    private String myHost;
-    private int myPort;
+    private String host;
+    private int port;
 
-    private String primaryHost;
-    private int primaryPort;
-    private Boolean isPrimary;
+    private volatile InetSocketAddress primaryAddress;
+    private volatile InetSocketAddress backupAddress;
 
-    private String backupHost;
-    private int backupPort;
+    private ReadWriteLock tableLock;
+    private ReadWriteLock[] bucketLocks;
 
-    private ReadWriteLock rwLock;
 
-    private Boolean backupExists;
-
-    public KeyValueHandler(String myHost, int myPort, CuratorFramework curClient, String zkNode) {
-        this.myHost = myHost;
-        this.myPort = myPort;
-        this.curClient = curClient;
-        this.zkNode = zkNode;
-        myMap = new ConcurrentHashMap<String, String>();
-        lockMap = new ConcurrentHashMap<String, ReadWriteLock>();
-        rwLock = new ReentrantReadWriteLock(true);
-    }
-
-    public Map<String, String> getSnapshot() throws org.apache.thrift.TException {
-        // System.out.println("KeyValueHandler:getSnapshot");
-        // System.out.println("KeyValueHandler:getSnapshot lockin on table");
-        rwLock.writeLock().lock();
-        Map<String, String> ret = myMap;
-        rwLock.writeLock().unlock();
-        // System.out.println("KeyValueHandler:getSnapshot unlocking on table");
-        return ret;
-    }
-
-    public void sync() {
-        // System.out.println("KeyValueHandler:sync");
-        // System.out.println("KeyValueHandler:sync locking on table");
-        rwLock.writeLock().lock();
-        try {
-            KeyValueService.Client primaryClient = getPrimaryKeyValueClient();
-            myMap = new ConcurrentHashMap<String,String>(primaryClient.getSnapshot());
-            // testPrint();
-        } catch (Exception e) {
-            System.out.println("could not sync with primary");
+    public KeyValueHandler(String host, int port, CuratorFramework curClient, String zkNode) {
+    	this.host = host;
+    	this.port = port;
+    	this.curClient = curClient;
+    	this.zkNode = zkNode;
+    	myMap = new ConcurrentHashMap<String, String>();
+        backupClients = new ConcurrentHashMap<InetSocketAddress, KeyValueService.Client>();
+        tableLock = new ReentrantReadWriteLock(true);
+        bucketLocks = new ReentrantReadWriteLock[100];
+        for (int i = 0; i < bucketLocks.length; i++) {
+            bucketLocks[i] = new ReentrantReadWriteLock(true);
         }
-        rwLock.writeLock().unlock();
-        // System.out.println("KeyValueHandler:sync unlocked table");
+        primaryAddress = null;
+        backupAddress = null;
     }
 
-    public synchronized String get(String key) throws org.apache.thrift.TException {
-        // System.out.println("KeyValueHandler:get with key: " + key);
-        String ret;
-//        if (!lockMap.containsKey(key)) {
-//            // System.out.println("KeyValueHandler:get creating lock for key: " + key);
-//            lockMap.put(key, new ReentrantReadWriteLock(true));
-//        }
-        lockMap.computeIfAbsent(key, k -> new ReentrantReadWriteLock(true));
-        // System.out.println("KeyValueHandler:get locking on key: " + key);
-        ReadWriteLock keyLock = lockMap.get(key);
-        keyLock.readLock().lock();
-        ret = myMap.get(key);
-        keyLock.readLock().unlock();
-        // System.out.println("KeyValueHandler:get unlocked on key: " + key);
-        if (ret == null) {
-            return "";
-        } else {
-            return ret;
+    public String get(String key) throws org.apache.thrift.TException
+    {
+        System.out.println("KeyValueHandler:get with key: " + key);
+        if (!isPrimary()) {
+            System.out.println("Client trying to get from backup, throwing an exception at it");
+            TSocket sock = new TSocket(primaryAddress.getHostName(), primaryAddress.getPort());
+            TTransport transport = new TFramedTransport(sock);
+            // this will throw an exception at the client
+            transport.open();;
         }
+        int bucket = hash(key);
+        bucketLocks[bucket].readLock().lock();
+    	String ret = myMap.get(key);
+        bucketLocks[bucket].readLock().unlock();
+    	if (ret == null)
+    	    return "";
+    	else
+    	    return ret;
     }
 
-    public synchronized void put(String key, String value) throws org.apache.thrift.TException {
-        // System.out.println("KeyValueHandler:put with key: " + key + " value: " + value);
-        if (isPrimary) {
-            // System.out.println("KeyValueHandler:put locking on table");
-            rwLock.readLock().lock();
-//            if (!lockMap.containsKey(key)) {
-//                // System.out.println("KeyValueHandler:put creating lock for key: " + key);
-//                lockMap.put(key, new ReentrantReadWriteLock(true));
-//            }
-            lockMap.computeIfAbsent(key, k -> new ReentrantReadWriteLock(true));
-            ReadWriteLock keyLock = lockMap.get(key);
-            // System.out.println("KeyValueHandler:put locking on key: " + key);
-            keyLock.writeLock().lock();
-            myMap.put(key,value);
-            // System.out.println("successfully locked on key " + key);
-            if (backupExists) {
-                try {
-                    TSocket sock = new TSocket(backupHost, backupPort);
-                    TTransport transport = new TFramedTransport(sock);
-                    transport.open();
-                    TProtocol protocol = new TBinaryProtocol(transport);
-                    KeyValueService.Client client = new KeyValueService.Client(protocol);
-                    client.backupPut(key, value);
-                    transport.close();
-                } catch (Exception e) {
-                    System.out.println("Failed RPC to backup");
-                    backupExists = false;
-                }
-            }
-            keyLock.writeLock().unlock();
-            // System.out.println("KeyValueHandler:put unlocked on key: " + key);
-            rwLock.readLock().unlock();
-            // System.out.println("KeyValueHandler:put unlocked on table");
+    public void put(String key, String value) throws org.apache.thrift.TException
+    {
+        System.out.println("KeyValueHandler:put with key: " + key + " value: " + value);
+        if (!isPrimary()) {
+            System.out.println("Client trying to put to backup incorrectly, throwing an exception at it");
+            TSocket sock = new TSocket(primaryAddress.getHostName(), primaryAddress.getPort());
+            TTransport transport = new TFramedTransport(sock);
+            // this will throw an exception at the client
+            transport.open();
         }
-        // System.out.println("Finished put with key: " + key + " value: " + value);
-    }
-
-    public void backupPut(String key, String value) throws org.apache.thrift.TException {
-        // System.out.println("Backup KeyValueHandler:backupPut with key: " + key + " value: " + value);
+        int bucket = hash(key);
+        tableLock.readLock().lock();
+        bucketLocks[bucket].writeLock().lock();
         myMap.put(key,value);
-    }
-
-    public synchronized void updateBackup(String hostName, int portNumber) {
-        // System.out.println("KeyValueHandler:updateBackup - Backup: " + hostName + ":" + portNumber);
-        backupHost = hostName;
-        backupPort = portNumber;
-        backupExists = true;
-    }
-
-    public synchronized void updatePrimary(String hostName, int portNumber) {
-        // System.out.println("KeyValueHandler:updatePrimary - Primary: " + hostName + ":" + portNumber);
-        primaryHost = hostName;
-        primaryPort = portNumber;
-        isPrimary = (myHost.equals(primaryHost) && myPort == primaryPort);
-    }
-
-    private KeyValueService.Client getPrimaryKeyValueClient() {
-        while (true) {
-            try {
-                TSocket sock = new TSocket(primaryHost, primaryPort);
+        if (backupAddress != null) {
+            try{
+                TSocket sock = new TSocket(backupAddress.getHostName(), backupAddress.getPort());
                 TTransport transport = new TFramedTransport(sock);
                 transport.open();
                 TProtocol protocol = new TBinaryProtocol(transport);
-                return new KeyValueService.Client(protocol);
+                KeyValueService.Client client = new KeyValueService.Client(protocol);
+                client.backupPut(key, value);
+                transport.close();
             } catch (Exception e) {
-                System.out.println("Unable to connect to primary");
+                System.out.println("Failed to write to backup");
+                System.out.println(e.getLocalizedMessage());
             }
+        } else {
+            System.out.println("backup is null");
+        }
+        bucketLocks[bucket].writeLock().unlock();
+        tableLock.readLock().unlock();
+    }
+
+    public Map<String,String> copy() throws org.apache.thrift.TException {
+        tableLock.writeLock().lock();
+        Map<String,String> ret = myMap;
+        tableLock.writeLock().unlock();
+        return ret;
+    }
+
+    public void backupPut(String key, String value) throws org.apache.thrift.TException {
+        System.out.println("backupPut with key: " + key + " value: " + value);
+        myMap.put(key,value);
+    }
+
+    public void sync() {
+        tableLock.writeLock().lock();
+        while(true) {
+            System.out.println("in here");
             try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
+                TSocket sock = new TSocket(primaryAddress.getHostName(), primaryAddress.getPort());
+                TTransport transport = new TFramedTransport(sock);
+                transport.open();
+                TProtocol protocol = new TBinaryProtocol(transport);
+                KeyValueService.Client client = new KeyValueService.Client(protocol);
+                Map<String,String> temp = client.copy();
+                // transport.close();
+                myMap = new ConcurrentHashMap<String,String>(temp);
+                break;
+            } catch(Exception e) {
+                System.out.println("Failed to sync with primary");
+                System.out.println(e.getLocalizedMessage());
             }
         }
+        tableLock.writeLock().unlock();
+    }
+
+    synchronized public void determineNodes() throws Exception {
+        List<String> children;
+        while(true) {
+            curClient.sync();
+            children = curClient.getChildren().usingWatcher(this).forPath(zkNode);
+            if (children.size() == 0) {
+                System.out.println("No primary found");
+                Thread.sleep(100);
+                continue;
+            }
+            if (children.size() >= 3) {
+                System.out.println("Zookeeper hasn't finished deleting the old crashed node");
+                Thread.sleep(100);
+                continue;
+            }
+            Collections.sort(children);
+            byte[] data = curClient.getData().forPath(zkNode + "/" + children.get(0));
+            String strData = new String(data);
+            String[] primary = strData.split(":");
+            primaryAddress = new InetSocketAddress(primary[0], Integer.parseInt(primary[1]));
+            System.out.println("Found primary " + strData);
+            System.out.println("Children size: " + children.size());
+            backupAddress = null;
+            if (children.size() > 1) {
+                // copy immediately, process stuff later the primary may die quickly and string operations are expensive
+                if (!isPrimary()) {
+                    sync();
+                }
+                byte[] backupData = curClient.getData().forPath(zkNode + "/" + children.get(1));
+                String backupStrData = new String(backupData);
+                String[] backup = backupStrData.split(":");
+                backupAddress = new InetSocketAddress(backup[0], Integer.parseInt(backup[1]));
+                // registerBackupClient(backupAddress);
+                System.out.println("Found backup " + backupStrData);
+            }
+            break;
+        }
+    }
+
+    synchronized public void process(WatchedEvent event) {
+        System.out.println("ZooKeeper event " + event);
+        try {
+            determineNodes();
+        } catch (Exception e) {
+            System.out.println("Unable to determine nodes");
+        }
+    }
+
+    private int hash(String key) {
+        return Math.abs(key.hashCode()%bucketLocks.length);
+    }
+
+    synchronized private void registerBackupClient(InetSocketAddress backupAddress) {
+        try {
+            TSocket sock = new TSocket(backupAddress.getHostName(), backupAddress.getPort());
+            TTransport transport = new TFramedTransport(sock);
+            transport.open();
+            TProtocol protocol = new TBinaryProtocol(transport);
+            KeyValueService.Client client = new KeyValueService.Client(protocol);
+            backupClients.put(backupAddress, client);
+        } catch (Exception e) {
+            System.out.println("Failed to registerBackupClient");
+        }
+    }
+
+    private synchronized Boolean isPrimary() {
+        return (host.equals(primaryAddress.getHostName()) && port == primaryAddress.getPort());
     }
 }
