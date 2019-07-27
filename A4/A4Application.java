@@ -45,11 +45,11 @@ class StudentProcessor extends AbstractProcessor<String, String> {
             if (currentRoomMaxOccupancy != null) {
                 // the room has a bounded occupancy so we may need to output things, if it was unbounded we  don't need to output anything
                 if (currentRoomCurrentOccupancy == currentRoomMaxOccupancy){
-                    context().forward(currentRoomId, "OK");
-                    context().commit();
+                    this.context.forward(currentRoomId, "OK");
+                    this.context.commit();
                 } else if (currentRoomCurrentOccupancy > currentRoomMaxOccupancy) {
-                    context().forward(currentRoomId, Long.toString(currentRoomCurrentOccupancy));
-                    context().commit();
+                    this.context.forward(currentRoomId, Long.toString(currentRoomCurrentOccupancy));
+                    this.context.commit();
                 }
             }
         }
@@ -60,8 +60,8 @@ class StudentProcessor extends AbstractProcessor<String, String> {
         if (newRoomMaxOccupancy != null) {
             // the room has a bounded occupancy
             if (newRoomCurrentOccupancy > newRoomMaxOccupancy) {
-                context().forward(newRoomId, Long.toString(newRoomCurrentOccupancy));
-                context().commit();
+                this.context.forward(newRoomId, Long.toString(newRoomCurrentOccupancy));
+                this.context.commit();
             }
         }
     }
@@ -87,8 +87,8 @@ class ClassroomProcessor extends AbstractProcessor<String, String> {
         Long oldMax = classroomMaxStore.get(roomId);
         if (oldMax != null) {
             if (oldMax < currentOccupancy && newMaxOccupancy >= currentOccupancy) {
-                context().forward(roomId, "OK");
-                context().commit();
+                this.context.forward(roomId, "OK");
+                this.context.commit();
             }
         }
         classroomMaxStore.put(roomId, newMaxOccupancy);
